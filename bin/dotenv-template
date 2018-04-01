@@ -1,5 +1,1 @@
-#!/usr/bin/env bash
-BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
-source "$BASE/../share/dotenv/commands.bash"
-dotenv-template $@
-# EOF - vim: ts=4 sw=4 noet syn=bash
+dotenv

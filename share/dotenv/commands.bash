@@ -37,6 +37,27 @@ function dotenv-profile {
 	fi
 }
 
+function dotenv-profile-apply {
+	local PROFILE="$DOTENV_PROFILES/$1"
+	if [ -z "$DOTENV_PROFILES" ]; then
+		dotenv_error "Environemnt variable DOTENV_PROFILES not defined"
+	elif [ ! -e "$PROFILE" ]; then
+		dotenv_info "Profile \"$1\" does not exist"
+		dotenv_profile_list
+	else
+		dotenv_profile_apply $1
+	fi
+}
+
+function dotenv-managed {
+	if [ ! -e "$DOTENV_MANAGED" ]; then
+		dotenv_info "No file managed by dotenv yet."
+		# TODO: Recommend steps to manage files
+	else
+		dotenv_managed_list
+	fi
+}
+
 function dotenv-template {
 	local TEMPLATE="$1"
 	local DIR
@@ -57,6 +78,7 @@ function dotenv-template {
 	fi
 }
 
+# TODO: Should be dotenv-template-merge
 function dotenv-merge {
 	local PARENT="$1"
 	local TEMPLATE="$2"
@@ -80,6 +102,7 @@ function dotenv-merge {
 	fi
 }
 
+# TODO: Should be dotenv-template-apply
 function dotenv-apply {
 ## Applies the given TEMPLATE to the given PROFILE=default.
 	#dotfile_template_apply ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien/config.sh
@@ -111,7 +134,10 @@ function dotenv-apply {
 			echo "$CONFIG_DELTA" >> "$CONFIG_SH"
 			$EDITOR "$CONFIG_SH"
 		fi
-		# #	dotenv_template_apply "$TEMPLATE" "$DOTENV_PROFILES/$PROFILE"
+		# Now we apply the files of the given template to the profile
+		# directory.
+		dotenv_info "$PROFILE ←― $TEMPLATE"
+		dotenv_template_link_files "$TEMPLATE" "$DOTENV_PROFILES/$PROFILE"
 	fi
 }
 

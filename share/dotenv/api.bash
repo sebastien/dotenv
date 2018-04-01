@@ -11,12 +11,19 @@
 # -----------------------------------------------------------------------------
 
 export DOTENV_API="0.0.0"
-DOTENV_USER_HOME=~
+DOTENV_USER_HOME=$HOME
 DOTENV_TEMPLATES=~/.dotenv/templates
 DOTENV_PROFILES=~/.dotenv/profiles
 DOTENV_BACKUP=~/.dotenv/backup
+DOTENV_MANAGED=~/.dotenv/managed
 
 # TODO: Keep track of the signatures of the deployed files
+
+# -----------------------------------------------------------------------------
+#
+# UTILITIES
+#
+# -----------------------------------------------------------------------------
 
 function dotenv_info {
 	echo "$*"
@@ -34,6 +41,12 @@ function dotenv_listdir {
 	fi
 }
 
+# -----------------------------------------------------------------------------
+#
+# TEMPLATE
+#
+# -----------------------------------------------------------------------------
+
 function dotenv_template_list {
 	local ALL
 	if [ -z "$DOTENV_TEMPLATES" ]; then
@@ -49,7 +62,9 @@ function dotenv_template_list {
 }
 
 function dotenv_template_link_files {
-## Applies the files in the given TEMPLATE to the given DIRECTORY
+## Creates symlinks between all the files defined in TEMPLATE and the
+## TARGET directory. Any file that is not a symlink and already exists
+## in the target will be left as-is.
 	local ALL
 	local TEMPLATE=$1
 	local TARGET=$2
@@ -93,6 +108,12 @@ function dotenv_template_link_files {
 	done
 }
 
+# -----------------------------------------------------------------------------
+#
+# PROFILES
+#
+# -----------------------------------------------------------------------------
+
 function dotenv_profile_list {
 	local ALL
 	if [ -z "$DOTENV_PROFILES" ]; then
@@ -107,45 +128,173 @@ function dotenv_profile_list {
 	fi
 }
 
-function dotenv_file_apply {
-# Applies the file at `FROM` to the given `TO` path
-# relative to the user's home. If there is an original file,
-# it will be backed up.
-	local FROM="$1"
-	local TO="$DOTENV_USER_HOME/$2"
-	if [ -e "$TO" ]; then
-		dotenv_file_backup "$TO" "$DOTENV_BACKUP"
-		chmod u+w "$TO"
-		rm "$TO"
+function dotenv_profile_apply {
+	# We list the files in the profile and remove the config.sh and
+	# the pre/post file
+	dotenv_managed_revert
+	if [ -d "$DOTENV_MANAGED" ]; then
+		dotenv_error "managed directory still present after revert: $DOTENV_MANAGED"
+		exit 1
 	fi
-	if [ -e "$FROM" ]; then
-		cp -a "$FROM" "$TO"
-		chmod -w "$TO"
+	dotenv_backup_restore
+	if [ -d "$DOTENV_BACKUP" ]; then
+		dotenv_error "backup directory still present after restore: $DOTENV_BACKUP"
+		exit 1
 	fi
-}
-
-function dotenv_file_revert {
-# Reverts the given file relative to the user's home using the
-# previously backed up version.
-	local FROM="$DOTENV_USER_HOME/$1"
-	local TO="$DOTENV_BACKUP/$1"
-	# TODO: Ensure that $FROM was not modified
-	if [ -e "$TO" ]; then
-		if [ -e "$FROM" ]; then
-			chmod u+w "$FROM"
-			rm "$FROM"
+	exit 0
+	# We iterate on all the files that are part of the current profile
+	for FILE in $(dotenv_profile_manifest "$1"); do
+		EXT="${FILE##*.}"
+		SUFFIX=${FILE#$DOTENV_PROFILES/$1/}
+		TARGET=$DOTENV_USER_HOME/.$SUFFIX
+		FILE_MANAGED=$DOTENV_MANAGED/$SUFFIX
+		FILE_BACKUP=$DOTENV_BACKUP/$SUFFIX
+		DIR_BACKUP=$(dirname "$DOTENV_BACKUP/$SUFFIX")
+		if [ "$EXT" = "tmpl" ]; then
+			TARGET=${TARGET%.*}
+			FILE_BACKUP=${FILE_BACKUP%.*}
+			FILE_MANAGED=${FILE_MANAGED%.*}
 		fi
-		cp -a "$TO" "$FROM"
+		# 1) If the TARGET exists, then we move it to the backup directory.
+		if [ -e "$TARGET" ]; then
+			# We make sure there's a directory where we can backup
+			if [ ! -e "$DIR_BACKUP" ]; then
+				mkdir -p "$DIR_BACKUP"
+			fi
+			if [ -d "$TARGET" ]; then
+				mv "$TARGET" "$FILE_BACKUP"
+			elif [ -f "$TARGET" ]; then
+				mv "$TARGET" "$FILE_BACKUP"
+			elif [ -L "$TARGET" ]; then
+				TARGET_REAL=$(readlink -f "$TARGET")
+				FILE_REAL=$(readlink -f "$FILE")
+				if [ "$TARGET_REAL" != "$FILE_REAL" ]; then
+					mv "$TARGET" "$FILE_BACKUP"
+				fi
+			fi
+		fi
+		# 2) Now we can create the managed file 
+		if [ ! -e "$(dirname "$FILE_MANAGED")" ]; then
+			mkdir -p "$(dirname "$FILE_MANAGED")"
+		fi
+		if [ "$EXT" = "tmpl" ]; then
+			if [ "$(dotenv_file_parts "$FILE")" = "" ]; then
+				TEMP=$(mktemp)
+				dotenv_file_assemble "$FILE" > "$TEMP"
+				dotenv_tmpl_apply "$TEMP" "$DOTENV_PROFILES/$1/config.sh" > "$FILE_MANAGED"
+				unlink "$TEMP"
+				chmod -r "$FILE_MANAGED"
+			else
+				dotenv_tmpl_apply "$FILE" "$DOTENV_PROFILES/$1/config.sh" > "$FILE_MANAGED"
+				chmod -r "$FILE_MANAGED"
+			fi
+			echo ln -sfr "$FILE_MANAGED" "$TARGET"
+		else
+			if [ "$(dotenv_file_parts "$FILE")" = "" ]; then
+				ln -sfr "$FILE" "$FILE_MANAGED"
+			else
+				dotenv_file_assemble "$FILE" > "$FILE_MANAGED"
+				# The output file is going to be readonly because it's 
+				# assembled.
+				chmod -w "$FILE_MANAGED"
+			fi
+		fi
+		echo ln -sfr "$FILE_MANAGED" "$TARGET"
+		
+	done
+}
+
+function dotenv_managed_revert {
+## Iterates on all the files in the $DOTENV_MANAGED directory. For each of this
+## file, the corresponding target file installed in $DOTENV_USER_HOME will be removed.
+## This requires the target file to point back to the same file as the managed
+## file. If not, this means the file was changed and the process will fail.
+	if [ -d "$DOTENV_MANAGED" ]; then
+		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d); do
+			TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_MANAGED/}
+			if [ -e "$TARGET" ]; then
+				ACTUAL_ORIGIN=$(readlink -f "$TARGET")
+				EXPECTED_ORIGIN=$(readlink -f "$FILE")
+				if [ "$ACTUAL_ORIGIN" != "$EXPECTED_ORIGIN" ]; then
+					# TODO: Improve error message
+					dotenv_error "Managed file \"$TARGET\" should point to \"$EXPECTED_ORIGIN\""
+					dotenv_error "but instead points to \"$ACTUAL_ORIGIN\""
+					# NOTE: We don't unlink the file there.
+				else
+					unlink "$TARGET"
+					unlink "$FILE"
+				fi
+				# We clean the target directory.
+				if [ "$(dirname "$TARGET")" != "" ]; then
+					dotenv_dir_clean "$(dirname "$TARGET")"
+				fi
+			else
+				unlink "$FILE"
+			fi
+		done
+		# TODO: Remove empty directories on the target side
+		# We remove empty directories
+		dotenv_dir_clean "$DOTENV_MANAGED"
+		if [ -e "$DOTENV_MANAGED" ] ; then
+			dotenv_error "Could not fully remove managed files, some files were altered"
+			exit 1
+		fi
 	fi
 }
 
-function dotenv_file_backup {
-	local FROM="$1"
-	local TO="$2"
-	if [ ! -e "$TO" ]; then
-		cp -a "$FROM" "$TO"
+function dotenv_backup_restore {
+## Moves back every single file in $DOTENV_BACKUP to its original location
+## in $DOTENV_USER_HOME. Empty directories will be pruned, which should
+## result in $DOTENV_BACKUP to not exit at the end.
+	if [ -d "$DOTENV_BACKUP" ]; then
+		# For each file in the backup directory
+		for FILE in $(find "$DOTENV_BACKUP" -name "*" -not -type d); do
+			# We determine the target directory
+			TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_BACKUP/}
+			TARGET_DIR=$(dirname "$TARGET")
+			if [ ! -d "$TARGET_DIR" ]; then
+				mkdir -p "$TARGET_DIR"
+			fi
+			# We move back the backed up file to its original location
+			if [ ! -e "$TARGET" ]; then
+				mv "$FILE" "$TARGET"
+			else
+				dotenv_error "Cannot restore backup \"$FILE\", \"$TARGET\" already exists."
+			fi
+		done
+		# We remove empty directories
+		dotenv_dir_clean "$DOTENV_BACKUP"
+		if [ -e "$DOTENV_BACKUP" ] ; then
+			dotenv_error "Could not fully restore backup, some files already exist:"
+			exit 1
+		fi
 	fi
 }
+
+function dotenv_profile_manifest {
+	find -L $DOTENV_PROFILES/$1 -name "*" -not -type d -not -name "config.sh" -not -name "*.post" -not -name "*.pre"
+}
+
+# -----------------------------------------------------------------------------
+#
+# MANAGED
+#
+# -----------------------------------------------------------------------------
+
+function dotenv_managed_list {
+## Lists the files currently managed by dotenv
+	if [ -e "$DOTENV_MANAGED" ]; then
+		for FILE in $(find $DOTENV_MANAGED -name "*" -not -type d ); do
+			echo $FILE
+		done
+	fi
+}
+
+# -----------------------------------------------------------------------------
+#
+# CONFIGURATION
+#
+# -----------------------------------------------------------------------------
 
 function dotenv_configuration_extract {
 ## Extracts the configuration variables defined in the given directory
@@ -172,6 +321,9 @@ function dotenv_configuration_create {
 }
 
 function dotenv_configuration_delta {
+## Outputs a user-editable delta to update their configuration file. Takes
+## a directory containing the TEMPLATE files and the CONFIG file
+## defining the variables.
 	local DIR_VARS=$(dotenv_configuration_extract "$1")
 	local CUR_VARS=""
 	if [ -e "$2" ]; then
@@ -201,69 +353,78 @@ function dotenv_configuration_delta {
 	fi
 }
 
-function dotenv_template_assemble {
-# Takes a path to a `TEMPLATE` file and a `SOURCE` directory and combines
-# the `TEMPLATE` with any file in `SOURCE`. This will look for all the files
-# that start with the basename of `TEMPLATE` and end up with `pre` or `post`.
+# -----------------------------------------------------------------------------
 #
-# ```
-# .dotenv/templates/work/hgrc.tmpl
-# .dotenv/profiles/john/hgrc.pre
-# .dotenv/profiles/john/hgrc.post
-# ```
-# 
-# ```
-# dotenv_template_assemble .dotenv/templates/work/hgrc.tmpl .dotenv/profiles/john
-# ```
+# TEMPLATE FILES
 #
-# will output the following files:
-#
-# ```
-# .dotenv/profiles/john/hgrc.pre
-# .dotenv/templates/work/hgrc.tmpl
-# .dotenv/profiles/john/hgrc.post
-# ```
-	local TEMPLATE="$1"
-	local SOURCE="$2"
-	if [ "${TEMPLATE##*.}" = "tmpl" ]; then
-		local RADIX=$(basename "${TEMPLATE%.*}")
-	else
-		local RADIX=$(basename "$TEMPLATE")
-	fi
-	for PRE in $SOURCE/$RADIX.pre $SOURCE/$RADIX.pre.*; do
+# -----------------------------------------------------------------------------
+
+function dotenv_dir_clean {
+	REMOVE_EMPTY="find \"$1\" -type d -empty -delete"
+	while [ "$(eval $REMOVE_EMPTY)" != "" ]; do
+		true
+	done
+}
+
+function dotenv_file_pre {
+	for PRE in $1.pre $1.pre.*; do
 		if [ -e "$PRE" ]; then
 			cat "$PRE"
 		fi
 	done
-	if [ -e "$TEMPLATE" ]; then
-		cat "$TEMPLATE"
-	fi
-	for POST in $SOURCE/$RADIX.post $SOURCE/$RADIX.post.*; do
+}
+
+function dotenv_file_post {
+	for POST in $1.post $1.post.*; do
 		if [ -e "$POST" ]; then
 			cat "$POST"
 		fi
 	done
 }
 
+function dotenv_file_parts {
+	dotenv_file_pre  "$1"
+	dotenv_file_post "$1"
+}
 
-function dotenv_template_file_apply {
-# Takes a path to a `TEMPLATE` file and a path to a `DATA` file that defines
-# environment variables that will then be replaces in the `TEMPLATE`. Any
-# expression like `${NAME}` is going to be expanded with the value of
-# `NAME`.
-	local TEMPLATE="$1"
-	local DATA="$2"
-	if [ -z "$DATA" ]; then
-		cat "$TEMPLATE"
-	elif [ ! -e "$DATA" ]; then
-		dotenv_error "Template data file $DATA does not exist"
+function dotenv_file_assemble {
+## Takes a path to a `FILE` and combines any `pre` or `post` files found
+## around it.
+	local FILE="$1"
+	for PRE in $FILE.pre $FILE.pre.*; do
+		if [ -e "$PRE" ]; then
+			cat "$PRE"
+		fi
+	done
+	if [ -e "$FILE" ]; then
+		cat "$FILE"
+	fi
+	for POST in $FILE/FILE.post $SOURCE/FILE.post.*; do
+		if [ -e "$POST" ]; then
+			cat "$POST"
+		fi
+	done
+}
+
+function dotenv_tmpl_apply {
+## Takes a path to a `.tmpl` `FILE` and a path to a `CONFIG` file that defines
+## environment variables that will then be replaces in the `TEMPLATE`. Any
+## expression like `${NAME}` is going to be expanded with the value of
+## `NAME`.
+	local FILE="$1"
+	local CONFIG="$2"
+	if [ -z "$CONFIG" ]; then
+		cat "$FILE"
+	elif [ ! -e "$CONFIG" ]; then
+		dotenv_error "Configuration file $CONFIG does not exist"
 	else
-		# First, we get the list of fields from the $DATA file, which
+		# First, we get the list of fields from the $CONFIG file, which
 		# is supposed to be a shell script.
-		local FIELDS=$(cat "$DATA" | egrep "^(export\s*)?[A-Z_]+\\s*=" | cut -d= -f1 | xargs echo)
+		local FIELDS=$(cat "$CONFIG" | egrep "^(export\s*)?[A-Z_]+\\s*=" | cut -d= -f1 | xargs echo)
+		# FIXME: We might want to backup the environment
 		# Now we source the data file. If this goes wrong, the script is
 		# probably going to stop.
-		source "$DATA"
+		source "$CONFIG"
 		# Now we build a SED expression to replace the strings.
 		local SEDEXPR=""
 		for FIELD in $FIELDS; do
@@ -278,7 +439,7 @@ function dotenv_template_file_apply {
 		done
 		# Now we process the template using the sed expression that 
 		# we just created.
-		cat $TEMPLATE | sed "$SEDEXPR"
+		cat "$FILE" | sed "$SEDEXPR"
 	fi
 }
 

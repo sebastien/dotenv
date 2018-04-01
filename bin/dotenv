@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
+source "$BASE/../share/dotenv/commands.bash"
+COMMAND=$(basename $0)
+case $COMMAND in
+"dotenv-profile")
+	DEFINED=1
+	;;
+"dotenv-profile-apply")
+	DEFINED=1
+	;;
+"dotenv-template")
+	DEFINED=1
+	;;
+"dotenv-managed")
+	DEFINED=1
+	;;
+esac
+if [ "$DEFINED" = 1 ]; then
+	eval "$COMMAND $*"
+else
+	echo "dotenv: unknown command $COMMAND"
+fi
+# EOF
