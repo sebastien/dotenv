@@ -128,55 +128,70 @@ function dotenv_profile_list {
 	fi
 }
 
-function dotenv_profile_apply {
-	# We list the files in the profile and remove the config.sh and
-	# the pre/post file
+function dotenv_profile_revert {
+	# We start by reverting any already managed file
 	dotenv_managed_revert
 	if [ -d "$DOTENV_MANAGED" ]; then
 		dotenv_error "managed directory still present after revert: $DOTENV_MANAGED"
 		exit 1
 	fi
+	# We restore backed up files so that the profile is in the 
+	# same state it was before dotenv was run.
 	dotenv_backup_restore
 	if [ -d "$DOTENV_BACKUP" ]; then
 		dotenv_error "backup directory still present after restore: $DOTENV_BACKUP"
 		exit 1
 	fi
-	exit 0
-	# We iterate on all the files that are part of the current profile
+}
+
+function dotenv_profile_apply {
+	dotenv_profile_revert
+	# Now we iterate on all the files that are part of the current profile
 	for FILE in $(dotenv_profile_manifest "$1"); do
-		EXT="${FILE##*.}"
+		# This defines the different paths for the file. The SUFFIX
+		# is local to the profile, the $TARGET is the dotfile within
+		# the HOME directory, the FILE_MANAGED is the build file that
+		# is symlinked to the HOME and the FILE_BACKUP is the file in
+		# the backup directory.
 		SUFFIX=${FILE#$DOTENV_PROFILES/$1/}
 		TARGET=$DOTENV_USER_HOME/.$SUFFIX
 		FILE_MANAGED=$DOTENV_MANAGED/$SUFFIX
 		FILE_BACKUP=$DOTENV_BACKUP/$SUFFIX
 		DIR_BACKUP=$(dirname "$DOTENV_BACKUP/$SUFFIX")
+		EXT="${FILE##*.}"
+		# Template (*.tmpl) files have their extension removed
 		if [ "$EXT" = "tmpl" ]; then
 			TARGET=${TARGET%.*}
 			FILE_BACKUP=${FILE_BACKUP%.*}
 			FILE_MANAGED=${FILE_MANAGED%.*}
 		fi
-		# 1) If the TARGET exists, then we move it to the backup directory.
+		# 1) If the TARGET exists, then we move it to the FILE_BACKUP path.
 		if [ -e "$TARGET" ]; then
 			# We make sure there's a directory where we can backup
 			if [ ! -e "$DIR_BACKUP" ]; then
 				mkdir -p "$DIR_BACKUP"
 			fi
-			if [ -d "$TARGET" ]; then
-				mv "$TARGET" "$FILE_BACKUP"
-			elif [ -f "$TARGET" ]; then
-				mv "$TARGET" "$FILE_BACKUP"
-			elif [ -L "$TARGET" ]; then
+			# Symlinks are compared with the real file. If they're the
+			# same, then we don't need to backup.
+			if [ -L "$TARGET" ]; then
 				TARGET_REAL=$(readlink -f "$TARGET")
 				FILE_REAL=$(readlink -f "$FILE")
 				if [ "$TARGET_REAL" != "$FILE_REAL" ]; then
 					mv "$TARGET" "$FILE_BACKUP"
 				fi
+			else
+				mv "$TARGET" "$FILE_BACKUP"
 			fi
 		fi
-		# 2) Now we can create the managed file 
+		# 2) Now that the TARGET file was backed-up (if already there),
+		#    we create the FILE_MANAGED version.
 		if [ ! -e "$(dirname "$FILE_MANAGED")" ]; then
 			mkdir -p "$(dirname "$FILE_MANAGED")"
 		fi
+		# Templates need to be assembled and expanded first, while
+		# regular files can be assembled. Managed files created from templates
+		# will be set to READ-ONLY, as they are generated from the config 
+		# file.
 		if [ "$EXT" = "tmpl" ]; then
 			if [ "$(dotenv_file_parts "$FILE")" = "" ]; then
 				TEMP=$(mktemp)
@@ -188,7 +203,7 @@ function dotenv_profile_apply {
 				dotenv_tmpl_apply "$FILE" "$DOTENV_PROFILES/$1/config.sh" > "$FILE_MANAGED"
 				chmod -r "$FILE_MANAGED"
 			fi
-			echo ln -sfr "$FILE_MANAGED" "$TARGET"
+			ln -sfr "$FILE_MANAGED" "$TARGET"
 		else
 			if [ "$(dotenv_file_parts "$FILE")" = "" ]; then
 				ln -sfr "$FILE" "$FILE_MANAGED"
@@ -199,8 +214,10 @@ function dotenv_profile_apply {
 				chmod -w "$FILE_MANAGED"
 			fi
 		fi
-		echo ln -sfr "$FILE_MANAGED" "$TARGET"
-		
+		# 3) We symlink from the FILE_MANAGED to the TARGET in the user's
+		#    HOME.
+		ln -sfr "$FILE_MANAGED" "$TARGET"
+		dotenv_info ".$SUFFIX"
 	done
 }
 
@@ -261,6 +278,7 @@ function dotenv_backup_restore {
 			else
 				dotenv_error "Cannot restore backup \"$FILE\", \"$TARGET\" already exists."
 			fi
+			dotenv_info "restored $TARGET"
 		done
 		# We remove empty directories
 		dotenv_dir_clean "$DOTENV_BACKUP"
@@ -285,9 +303,13 @@ function dotenv_managed_list {
 ## Lists the files currently managed by dotenv
 	if [ -e "$DOTENV_MANAGED" ]; then
 		for FILE in $(find $DOTENV_MANAGED -name "*" -not -type d ); do
-			echo $FILE
+			echo "~/.${FILE#$DOTENV_MANAGED/} ← ~/${FILE#$HOME/}"
 		done
 	fi
+}
+
+function dotenv_manage_file {
+	echo "DOTENV MANAGE"
 }
 
 # -----------------------------------------------------------------------------
@@ -360,10 +382,12 @@ function dotenv_configuration_delta {
 # -----------------------------------------------------------------------------
 
 function dotenv_dir_clean {
-	REMOVE_EMPTY="find \"$1\" -type d -empty -delete"
-	while [ "$(eval $REMOVE_EMPTY)" != "" ]; do
-		true
-	done
+	# This makes sure that the suffix is not the home directory
+	DIRPATH=$(readlink -f "$1")
+	SUFFIX=${DIRPATH#$HOME}
+	if [ -d "$DIRPATH" ] && [ "$SUFFIX" != "" ] && [ "$SUFFIX" != "/" ]; then
+		find "$DIRPATH" -depth -type d -empty -exec rmdir '{}' ';'
+	fi
 }
 
 function dotenv_file_pre {

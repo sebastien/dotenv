@@ -38,6 +38,7 @@ function dotenv-profile {
 }
 
 function dotenv-profile-apply {
+## Applies the profile with the given name as the current profile.
 	local PROFILE="$DOTENV_PROFILES/$1"
 	if [ -z "$DOTENV_PROFILES" ]; then
 		dotenv_error "Environemnt variable DOTENV_PROFILES not defined"
@@ -45,17 +46,32 @@ function dotenv-profile-apply {
 		dotenv_info "Profile \"$1\" does not exist"
 		dotenv_profile_list
 	else
-		dotenv_profile_apply $1
+		dotenv_profile_apply "$1"
+	fi
+}
+
+function dotenv-profile-revert {
+## Reverts the currently applied profile
+	if [ -d "$DOTENV_MANAGED" ]; then
+		dotenv_profile_revert
+	else
+		dotenv_info "No profile applied yet."
+		dotenv_info "- dotenv-profile: to list available profiles"
+		dotenv_info "- dotenv-profile-apply PROFILE: to apply the given PROFILE"
 	fi
 }
 
 function dotenv-managed {
 	if [ ! -e "$DOTENV_MANAGED" ]; then
 		dotenv_info "No file managed by dotenv yet."
-		# TODO: Recommend steps to manage files
+		dotenv_info "- dotenv-manage FILE…: add file to the current profile (default) "
 	else
 		dotenv_managed_list
 	fi
+}
+
+function dotenv-manage {
+	dotenv_manage_file "$1"
 }
 
 function dotenv-template {
@@ -119,8 +135,8 @@ function dotenv-apply {
 	elif [ ! -e "$DOTENV_TEMPLATES/$TEMPLATE" ]; then
 		dotenv_error "TEMPLATE \"$TEMPLATE\" not found at $DOTENV_TEMPLATE/$TEMPLATE"
 		dotenv_info  "Available templates:"
-		for PROF in $(dotenv-template); do
-			echo " - $PROF"
+		for TMPL in $(dotenv-template); do
+			echo " - $TMPL"
 		done
 	else
 		# We create the profile if it does not exist
@@ -140,6 +156,5 @@ function dotenv-apply {
 		dotenv_template_link_files "$TEMPLATE" "$DOTENV_PROFILES/$PROFILE"
 	fi
 }
-
 
 # EOF - vim: ts=4 sw=4 noet 

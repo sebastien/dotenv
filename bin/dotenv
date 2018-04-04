@@ -9,10 +9,16 @@ case $COMMAND in
 "dotenv-profile-apply")
 	DEFINED=1
 	;;
+"dotenv-profile-revert")
+	DEFINED=1
+	;;
 "dotenv-template")
 	DEFINED=1
 	;;
 "dotenv-managed")
+	DEFINED=1
+	;;
+"dotenv-manage")
 	DEFINED=1
 	;;
 esac

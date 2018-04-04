@@ -10,20 +10,47 @@
               \/__,_ /\/___/  \/__/\/____/\/_/\/_/\/__/
 ```
 
+`dotenv` is a *dotfiles manager* that is designed to make it possible
+to share and extend profile environments. With dotenv, it is possible
+to use an existing set of configuration files and extend them locally, without
+breaking upstream compatibility.
+
+This makes `dotenv` best suited for environments where many developers want to
+share a common setup, while allowing each for individual configuration and 
+customization.
+
+Features:
+
+- Profile templates: templates can be defined and applied to a user profile,
+  with overriding of specific configuration variables.
+
+- Multiple profiles: different sets of dotfiles can be installed and managed
+  
+- Safe: dotenv will never override a file that it does not manages
+
+- Easy transition: you can gradually migrate your dotfiles to `dotenv`
+
+
 ## Quick Start
 
+To install `dotenv`, run:
+
+```shell
+curl https://raw.githubusercontent.com/sebastien/dotenv/master/install.sh | bash
 ```
-$ dotenv-template work
-dotenv: template "work" created at ~/.dotenv/templates/work
 
-$ dotenv-apply work
-dotenv: template "work" applied to profile "default"
+This will install `dotenv` in `~/local/{bin|share}`, you can then start
+managing files:
 
+``` 
+dotenv-manage ~/.bashrc ~/.vimrc ~/.vim
 ```
 
 ## Dependencies
 
-`bash`, `sed`.
+`dotenv-manage ~/.bashrc`
+
+`bash`, `sed`, `find`.
 
 ## Commands
 
@@ -33,6 +60,8 @@ dotenv: template "work" applied to profile "default"
     With no argument, returns the currently list of available profiles. With an argument,
     applies the given profile. If a profile is already applied, it will be
     reverted first.
+
+- `dotenv-manage FILE…`
 
 - `dotenv-apply TEMPLATE PROFILE`
 
@@ -62,3 +91,11 @@ dotenv: template "work" applied to profile "default"
     Tells if the file at the given path is managed by dotenv. If no path is
     given, lists the files that are currently managed by dotenv.
 
+## Similar tools
+
+[GNU Stow](https://www.gnu.org/software/stow/) ― manages symlinks from 
+a source directory to a target directory, and is popular for managing dotfiles.
+
+[jbernard/dotfiles](https://github.com/jbernard/dotfiles) ― creates symlinks from
+a dotfiles directory to your home directory, detecting if some dotfiles are not
+linked.
