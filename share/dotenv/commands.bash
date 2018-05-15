@@ -17,68 +17,89 @@ BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
 
 source "$BASE/api.bash"
 
-function dotenv-profile {
-	local PROFILE="$1"
-	local DIR
-	if [ -z "$DOTENV_PROFILES" ]; then
-		dotenv_error "Environemnt variable DOTENV_PROFILES not defined"
-	elif [ -z "$PROFILE" ]; then
-		dotenv_profile_list
-	else
-		DIR="$DOTENV_PROFILES/$PROFILE"
-		if [ ! -d "$DIR" ]; then
-			dotenv_info "profile \"$PROFILE\" created at: $DIR"
-			mkdir -p "$DIR"
-		else
-			for FILE in $(dotenv_listdir "$DIR"); do
-				echo "$FILE"
-			done
-		fi
-	fi
-}
+function command-dotenv {
+# Lists the available profiles
+# -l --list PROFILE
 
-function dotenv-profile-apply {
-## Applies the profile with the given name as the current profile.
-	local PROFILE="$DOTENV_PROFILES/$1"
 	if [ -z "$DOTENV_PROFILES" ]; then
-		dotenv_error "Environemnt variable DOTENV_PROFILES not defined"
-	elif [ ! -e "$PROFILE" ]; then
-		dotenv_info "Profile \"$1\" does not exist"
-		dotenv_profile_list
-	else
-		dotenv_profile_apply "$1"
+		dotenv_fail "Environment variable DOTENV_PROFILES not defined"
 	fi
-}
 
-function dotenv-profile-revert {
-## Reverts the currently applied profile
+	while [ "$#" -gt 0 ]
+	do
+		case "$1" in
+		-h|--help)
+			dotenv_output "TODO: Usage"
+			;;
+		-l|--list)
+			dotenv_profile_list
+			exit 0
+			;;
+		-*)
+			dotenv_fail "Invalid option '$1'. Use --help to see the valid options" >&2
+			;;
+		# an option argument, continue
+		none)
+			if [ -d "$DOTENV_MANAGED" ]; then
+				dotenv_info "Reverting applied profile"
+				dotenv_profile_revert
+			else
+				dotenv_info "No active profile"
+			fi
+			exit 0
+			;;
+		*)
+			dotenv_info "Applying profile $1"
+			dotenv_profile_apply $1
+			exit 0
+			;;
+		esac
+		shift
+	done
 	if [ -d "$DOTENV_MANAGED" ]; then
-		dotenv_profile_revert
-	else
-		dotenv_info "No profile applied yet."
-		dotenv_info "- dotenv-profile: to list available profiles"
-		dotenv_info "- dotenv-profile-apply PROFILE: to apply the given PROFILE"
-	fi
-}
-
-function dotenv-managed {
-	if [ ! -e "$DOTENV_MANAGED" ]; then
-		dotenv_info "No file managed by dotenv yet."
-		dotenv_info "- dotenv-manage FILE…: add file to the current profile (default) "
-	else
 		dotenv_managed_list
+		exit 0
+	else
+		dotenv_info "No active profile, run dotenv with one of:"
+		dotenv_profile_list
+		exit 0
 	fi
 }
 
-function dotenv-manage {
+
+function command-dotenv-manage {
 	dotenv_manage_file "$1"
 }
+
+function command-dotenv-unmanage {
+	dotenv_unmanage_file "$1"
+}
+
+function command-dotenv-managed {
+	if [ -z "$DOTENV_PROFILES" ]; then
+		dotenv_error "Environment variable DOTENV_PROFILES not defined"
+	elif [ -z "$1" ]; then
+		dotenv_managed_list
+		exit 0
+	else
+		for FILE in $(dotenv_profile_manifest "$1"); do
+			echo "~/${FILE#$HOME/} → ~/.${FILE#$DOTENV_PROFILES/$1/}"
+		done
+		exit 0
+	fi
+}
+
+# -----------------------------------------------------------------------------
+#
+# FILES & TEMPLATES
+#
+# -----------------------------------------------------------------------------
 
 function dotenv-template {
 	local TEMPLATE="$1"
 	local DIR
 	if [ -z "$DOTENV_TEMPLATES" ]; then
-		dotenv_error "Environemnt variable DOTENV_TEMPLATES not defined"
+		dotenv_error "Environment variable DOTENV_TEMPLATES not defined"
 	elif [ -z "$TEMPLATE" ]; then
 		dotenv_template_list
 	else
@@ -95,11 +116,11 @@ function dotenv-template {
 }
 
 # TODO: Should be dotenv-template-merge
-function dotenv-merge {
+function dotenv-template-merge {
 	local PARENT="$1"
 	local TEMPLATE="$2"
 	if [ -z "$PARENT" ] && [ -z "$TEMPLATE" ]; then
-		dotenv_error "dotenv-merge PARENT TEMPLATE"
+		dotenv_error "dotenv-template-merge PARENT TEMPLATE"
 	elif [ -z "$PARENT" ]; then
 		dotenv_error "PARENT is expected"
 	elif [ -z "$TEMPLATE" ]; then
@@ -119,7 +140,7 @@ function dotenv-merge {
 }
 
 # TODO: Should be dotenv-template-apply
-function dotenv-apply {
+function dotenv-template-apply {
 ## Applies the given TEMPLATE to the given PROFILE=default.
 	#dotfile_template_apply ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien/config.sh
 	#dotfile_template_assemble ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien
@@ -129,7 +150,7 @@ function dotenv-apply {
 		PROFILE="default"
 	fi
 	if [ -z "$TEMPLATE" ]; then
-		dotenv_error "dotenv-apply TEMPLATE PROFILE"
+		dotenv_error "dotenv-template-apply TEMPLATE PROFILE"
 	elif [ -z "$TEMPLATE" ]; then
 		dotenv_error "TEMPLATE is expected"
 	elif [ ! -e "$DOTENV_TEMPLATES/$TEMPLATE" ]; then

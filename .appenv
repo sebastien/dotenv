@@ -1,0 +1,6 @@
+#!/usr/bin/bash
+appenv_module  dotenv
+appenv_declare DOTENV_HOME  "$APPENV_DIR"
+appenv_prepend PATH         "$DOTENV_HOME"/bin
+# EOF
+

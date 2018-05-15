@@ -16,6 +16,7 @@ DOTENV_TEMPLATES=~/.dotenv/templates
 DOTENV_PROFILES=~/.dotenv/profiles
 DOTENV_BACKUP=~/.dotenv/backup
 DOTENV_MANAGED=~/.dotenv/managed
+DOTENV_ACTIVE=~/.dotenv/active
 
 # TODO: Keep track of the signatures of the deployed files
 
@@ -33,86 +34,26 @@ function dotenv_error {
 	echo "$*"
 }
 
-function dotenv_listdir {
-	local ALL
-	ALL=$(echo "$1"/*)
-	if [ "$ALL" != "$1/*" ]; then
-		echo "$ALL"
-	fi
+function dotenv_fail {
+	echo "$*"
+	exit -1
+}
+function dotenv_output {
+	echo "$*"
+	exit 0
 }
 
-# -----------------------------------------------------------------------------
-#
-# TEMPLATE
-#
-# -----------------------------------------------------------------------------
-
-function dotenv_template_list {
-	local ALL
-	if [ -z "$DOTENV_TEMPLATES" ]; then
-		dotenv_error "Environemnt variable DOTENV_TEMPLATES not defined"
-	elif [ "$ALL" = "$DOTENV_TEMPLATES/*" ]; then
-		dotenv_info "No templates defined in $DOTENV_TEMPLATES"
-	else
-		ALL=$(dotenv_listdir "$DOTENV_TEMPLATES")
-		for NAME in $ALL; do
-			basename "$NAME"
-		done
-	fi
-}
-
-function dotenv_template_link_files {
-## Creates symlinks between all the files defined in TEMPLATE and the
-## TARGET directory. Any file that is not a symlink and already exists
-## in the target will be left as-is.
-	local ALL
-	local TEMPLATE=$1
-	local TARGET=$2
-	# We list all the files in the template directory, ignoring
-	# the directories
-	ALL=$(find "$DOTENV_TEMPLATES/$TEMPLATE" -name "*" -not -type d)
-	for FILE in $ALL; do
-		if [ "${FILE##*.}" = "swp" ]; then
-			SUFFIX=""
-		elif [ "${FILE##*.}" = "tmpl" ]; then
-			SUFFIX="${FILE#$DOTENV_TEMPLATES/$TEMPLATE/}"
-			#SUFFIX="${SUFFIX%.tmpl}"
-		else
-			SUFFIX="${FILE#$DOTENV_TEMPLATES/$TEMPLATE/}"
-		fi
-		DEST_FILE="$TARGET/$SUFFIX"
-		if [ ! -z "$SUFFIX" ]; then
-			# We get the parent directory and create it if necessessary
-			TARGET_PARENT=$(dirname "$DEST_FILE")
-			if [ ! -z "$TARGET_PARENT" ] && [ ! -e "$TARGET_PARENT" ]; then
-				mkdir -p "$TARGET_PARENT"
-			fi
-			# Now we create symlinks
-			if [ ! -e "$DEST_FILE" ]; then
-				# If the  file does not exist, it's trivial.
-				# FIXME
-				# if [ "${FILE##*.}" = "tmpl" ]; then
-				# 	echo "$FILE" "―(TEMPLATE)→" "$DEST_FILE"
-				# else
-				ln -sfr "$FILE" "$DEST_FILE"
-				dotenv_info "$DEST_FILE"
-			elif [ -L "$DEST_FILE" ]; then
-				# If the file does exist, it must be a symlink
-				unlink "$DEST_FILE"
-				ln -sfr "$FILE" "$DEST_FILE"
-				dotenv_info "$DEST_FILE"
-			else
-				dotenv_error "$DEST_FILE already exist and is not a symlink. Keeping it as-is."
-			fi
-		fi
-	done
-}
 
 # -----------------------------------------------------------------------------
 #
 # PROFILES
 #
 # -----------------------------------------------------------------------------
+
+
+function dotenv_profile_manifest {
+	find -L "$DOTENV_PROFILES/$1" -name "*" -not -type d -not -name "config.sh" -not -name "*.post" -not -name "*.pre"
+}
 
 function dotenv_profile_list {
 	local ALL
@@ -121,7 +62,7 @@ function dotenv_profile_list {
 	elif [ "$ALL" = "$DOTENV_PROFILES/*" ]; then
 		dotenv_info "No templates defined in $DOTENV_PROFILES"
 	else
-		ALL=$(dotenv_listdir "$DOTENV_PROFILES")
+		ALL=$(dotenv_dir_list "$DOTENV_PROFILES")
 		for NAME in $ALL; do
 			basename "$NAME"
 		done
@@ -289,13 +230,10 @@ function dotenv_backup_restore {
 	fi
 }
 
-function dotenv_profile_manifest {
-	find -L $DOTENV_PROFILES/$1 -name "*" -not -type d -not -name "config.sh" -not -name "*.post" -not -name "*.pre"
-}
 
 # -----------------------------------------------------------------------------
 #
-# MANAGED
+# MANAGING FILES
 #
 # -----------------------------------------------------------------------------
 
@@ -309,6 +247,9 @@ function dotenv_managed_list {
 }
 
 function dotenv_manage_file {
+	echo "DOTENV MANAGE"
+}
+function dotenv_unmanage_file {
 	echo "DOTENV MANAGE"
 }
 
@@ -377,9 +318,85 @@ function dotenv_configuration_delta {
 
 # -----------------------------------------------------------------------------
 #
-# TEMPLATE FILES
+# TEMPLATES HIGH-LEVEL
 #
 # -----------------------------------------------------------------------------
+
+function dotenv_template_list {
+	local ALL
+	if [ -z "$DOTENV_TEMPLATES" ]; then
+		dotenv_error "Environemnt variable DOTENV_TEMPLATES not defined"
+	elif [ "$ALL" = "$DOTENV_TEMPLATES/*" ]; then
+		dotenv_info "No templates defined in $DOTENV_TEMPLATES"
+	else
+		ALL=$(dotenv_dir_list "$DOTENV_TEMPLATES")
+		for NAME in $ALL; do
+			basename "$NAME"
+		done
+	fi
+}
+
+function dotenv_template_link_files {
+## Creates symlinks between all the files defined in TEMPLATE and the
+## TARGET directory. Any file that is not a symlink and already exists
+## in the target will be left as-is.
+	local ALL
+	local TEMPLATE=$1
+	local TARGET=$2
+	# We list all the files in the template directory, ignoring
+	# the directories
+	ALL=$(find "$DOTENV_TEMPLATES/$TEMPLATE" -name "*" -not -type d)
+	for FILE in $ALL; do
+		if [ "${FILE##*.}" = "swp" ]; then
+			SUFFIX=""
+		elif [ "${FILE##*.}" = "tmpl" ]; then
+			SUFFIX="${FILE#$DOTENV_TEMPLATES/$TEMPLATE/}"
+			#SUFFIX="${SUFFIX%.tmpl}"
+		else
+			SUFFIX="${FILE#$DOTENV_TEMPLATES/$TEMPLATE/}"
+		fi
+		DEST_FILE="$TARGET/$SUFFIX"
+		if [ ! -z "$SUFFIX" ]; then
+			# We get the parent directory and create it if necessessary
+			TARGET_PARENT=$(dirname "$DEST_FILE")
+			if [ ! -z "$TARGET_PARENT" ] && [ ! -e "$TARGET_PARENT" ]; then
+				mkdir -p "$TARGET_PARENT"
+			fi
+			# Now we create symlinks
+			if [ ! -e "$DEST_FILE" ]; then
+				# If the  file does not exist, it's trivial.
+				# FIXME
+				# if [ "${FILE##*.}" = "tmpl" ]; then
+				# 	echo "$FILE" "―(TEMPLATE)→" "$DEST_FILE"
+				# else
+				ln -sfr "$FILE" "$DEST_FILE"
+				dotenv_info "$DEST_FILE"
+			elif [ -L "$DEST_FILE" ]; then
+				# If the file does exist, it must be a symlink
+				unlink "$DEST_FILE"
+				ln -sfr "$FILE" "$DEST_FILE"
+				dotenv_info "$DEST_FILE"
+			else
+				dotenv_error "$DEST_FILE already exist and is not a symlink. Keeping it as-is."
+			fi
+		fi
+	done
+}
+
+# -----------------------------------------------------------------------------
+#
+# HELPER FUNCTIONS
+#
+# -----------------------------------------------------------------------------
+
+
+function dotenv_dir_list {
+	local ALL
+	ALL=$(echo "$1"/*)
+	if [ "$ALL" != "$1/*" ]; then
+		echo "$ALL"
+	fi
+}
 
 function dotenv_dir_clean {
 	# This makes sure that the suffix is not the home directory
@@ -466,6 +483,5 @@ function dotenv_tmpl_apply {
 		cat "$FILE" | sed "$SEDEXPR"
 	fi
 }
-
 
 # EOF

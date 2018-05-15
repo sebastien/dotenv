@@ -3,27 +3,12 @@ BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
 source "$BASE/../share/dotenv/commands.bash"
 COMMAND=$(basename $0)
 case $COMMAND in
-"dotenv-profile")
-	DEFINED=1
-	;;
-"dotenv-profile-apply")
-	DEFINED=1
-	;;
-"dotenv-profile-revert")
-	DEFINED=1
-	;;
-"dotenv-template")
-	DEFINED=1
-	;;
-"dotenv-managed")
-	DEFINED=1
-	;;
-"dotenv-manage")
+"dotenv"|"dotenv-manage"|"dotenv-unmanage"|"dotenv-managed")
 	DEFINED=1
 	;;
 esac
 if [ "$DEFINED" = 1 ]; then
-	eval "$COMMAND $*"
+	eval "command-$COMMAND $*"
 else
 	echo "dotenv: unknown command $COMMAND"
 fi
