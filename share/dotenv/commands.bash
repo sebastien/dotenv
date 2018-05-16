@@ -61,18 +61,18 @@ function command-dotenv {
 		exit 0
 	else
 		dotenv_info "No active profile, run dotenv with one of:"
-		dotenv_profile_list
+		dotenv_list "$(dotenv_profile_list)"
 		exit 0
 	fi
 }
 
 
 function command-dotenv-manage {
-	dotenv_manage_file "$1"
+	dotenv_managed_add "$1"
 }
 
 function command-dotenv-unmanage {
-	dotenv_unmanage_file "$1"
+	dotenv_managed_remove "$1"
 }
 
 function command-dotenv-managed {
@@ -142,7 +142,7 @@ function dotenv-template-merge {
 # TODO: Should be dotenv-template-apply
 function dotenv-template-apply {
 ## Applies the given TEMPLATE to the given PROFILE=default.
-	#dotfile_template_apply ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien/config.sh
+	#dotfile_template_apply ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien/config.dotenv.sh
 	#dotfile_template_assemble ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien
 	local TEMPLATE="$1"
 	local PROFILE="$2"
@@ -165,11 +165,11 @@ function dotenv-template-apply {
 			mkdir -p "$DOTENV_PROFILES/$PROFILE"
 		fi
 		# We generate or update the configuration file
-		local CONFIG_SH="$DOTENV_PROFILES/$PROFILE/config.sh"
-		local CONFIG_DELTA=$(dotenv_configuration_delta "$DOTENV_TEMPLATES/$TEMPLATE" "$CONFIG_SH")
+		local CONFIG_DOTENV="$DOTENV_PROFILES/$PROFILE/config.dotenv.sh"
+		local CONFIG_DELTA=$(dotenv_configuration_delta "$DOTENV_TEMPLATES/$TEMPLATE" "$CONFIG_DOTENV")
 		if [ ! -z "$CONFIG_DELTA" ]; then
-			echo "$CONFIG_DELTA" >> "$CONFIG_SH"
-			$EDITOR "$CONFIG_SH"
+			echo "$CONFIG_DELTA" >> "$CONFIG_DOTENV"
+			$EDITOR "$CONFIG_DOTENV"
 		fi
 		# Now we apply the files of the given template to the profile
 		# directory.

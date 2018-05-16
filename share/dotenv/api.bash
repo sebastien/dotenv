@@ -20,6 +20,22 @@ DOTENV_ACTIVE=~/.dotenv/active
 
 # TODO: Keep track of the signatures of the deployed files
 
+# FIXME: DOes not work
+GREEN='\033[38;5;196m'
+GREEN_BOLD='\033[1;38;5;196m'
+
+GREEN='\033[38;5;82m'
+GREEN_BOLD='\033[1;38;5;82m'
+
+YELLOW='\033[38;5;220m'
+YELLOW_BOLD='\033[1;38;5;220m'
+
+BLUE='\033[38;5;45m'
+BLUE_BOLD='\033[1;38;5;45m'
+
+NORMAL='\033[0m' # No Color
+NC="$NORMAL"
+
 # -----------------------------------------------------------------------------
 #
 # UTILITIES
@@ -27,22 +43,30 @@ DOTENV_ACTIVE=~/.dotenv/active
 # -----------------------------------------------------------------------------
 
 function dotenv_info {
+	# TODO: Should output in green or blue
 	echo "$*"
 }
 
 function dotenv_error {
+	# TODO: Should output in red
 	echo "$*"
+}
+
+function dotenv_list {
+	for ITEM in "$@"; do
+		echo "- $ITEM"
+	done
 }
 
 function dotenv_fail {
 	echo "$*"
 	exit -1
 }
+
 function dotenv_output {
 	echo "$*"
 	exit 0
 }
-
 
 # -----------------------------------------------------------------------------
 #
@@ -52,7 +76,7 @@ function dotenv_output {
 
 
 function dotenv_profile_manifest {
-	find -L "$DOTENV_PROFILES/$1" -name "*" -not -type d -not -name "config.sh" -not -name "*.post" -not -name "*.pre"
+	find -L "$DOTENV_PROFILES/$1" -name "*" -not -type d -not -name "config.dotenv.sh" -not -name "*.post" -not -name "*.pre"
 }
 
 function dotenv_profile_list {
@@ -137,11 +161,11 @@ function dotenv_profile_apply {
 			if [ "$(dotenv_file_parts "$FILE")" = "" ]; then
 				TEMP=$(mktemp)
 				dotenv_file_assemble "$FILE" > "$TEMP"
-				dotenv_tmpl_apply "$TEMP" "$DOTENV_PROFILES/$1/config.sh" > "$FILE_MANAGED"
+				dotenv_tmpl_apply "$TEMP" "$DOTENV_PROFILES/$1/config.dotenv.sh" > "$FILE_MANAGED"
 				unlink "$TEMP"
 				chmod -r "$FILE_MANAGED"
 			else
-				dotenv_tmpl_apply "$FILE" "$DOTENV_PROFILES/$1/config.sh" > "$FILE_MANAGED"
+				dotenv_tmpl_apply "$FILE" "$DOTENV_PROFILES/$1/config.dotenv.sh" > "$FILE_MANAGED"
 				chmod -r "$FILE_MANAGED"
 			fi
 			ln -sfr "$FILE_MANAGED" "$TARGET"
@@ -246,11 +270,15 @@ function dotenv_managed_list {
 	fi
 }
 
-function dotenv_manage_file {
+function dotenv_managed_add {
+	# 1) Is the file already managed?
+	# 2) Is there an active profile?
+	# 3) Is the file already there in the active profile?
+	# 3) Is there a template or fragments that match the file?
 	echo "DOTENV MANAGE"
 }
-function dotenv_unmanage_file {
-	echo "DOTENV MANAGE"
+function dotenv_managed_remove {
+	echo "DOTENV UNMANAGE"
 }
 
 # -----------------------------------------------------------------------------
