@@ -3,7 +3,7 @@ BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
 source "$BASE/../share/dotenv/commands.bash"
 COMMAND=$(basename $0)
 case $COMMAND in
-"dotenv"|"dotenv-manage"|"dotenv-unmanage"|"dotenv-managed")
+"dotenv"|"dotenv-manage")
 	DEFINED=1
 	;;
 esac

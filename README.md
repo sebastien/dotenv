@@ -192,15 +192,14 @@ Here's a table that illustrates how the dotfiles are built:
    be located at `~/.dotenv/profile/active`. Any file overridden by
    the profile will be backed up in `~/.dotenv/backup`.
 
-- `dotenv -a|--active` ― outputs the name of the currently active profile
+- `dotenv -r|--remove` ― removes any managed files and restores the files
+  in the state they were before dotenv was first run.
 
 - `dotenv -l|--list` ― outputs the name of the currently active profile
 
 - `dotenv -u|--update` ― updates and rebuilds the managed files, making sure
   all the files are up to date.
 
-- `dotenv -c|--clear` ― clears any managed files and restores the files
-  in the state they were before dotenv was first run.
 
 ### Manage Files
 
@@ -213,6 +212,8 @@ Here's a table that illustrates how the dotfiles are built:
 
 - `dotenv-manage -l|--list PROFILE?` ― outputs the list of files managed by the given
    profile, or the active profile by default.
+
+- `dotenv-manage -u|--update` ― updates the files managed by the active profile.
 
 ### Apply Templates
 
@@ -241,9 +242,6 @@ Here's a table that illustrates how the dotfiles are built:
 
 - `dotenv-pull PROFILE? TEMPLATE?` ― pulls the given profiles and/or templates,
    all by default.
-
-- `dotenv-make FILE` ― rebuild the given `FILE`, if it is managed and build
-  from tempates.
 
 ## Similar tools
 

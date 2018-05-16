@@ -31,15 +31,18 @@ function command-dotenv {
 		-h|--help)
 			dotenv_output "TODO: Usage"
 			;;
+		-a|--active)
+			dotenv_profile_active
+			exit 0
+			;;
 		-l|--list)
 			dotenv_profile_list
 			exit 0
 			;;
-		-*)
-			dotenv_fail "Invalid option '$1'. Use --help to see the valid options" >&2
+		-u|--update)
+			dotenv_fail "Not implemented yet"
 			;;
-		# an option argument, continue
-		none)
+		-r|--remove)
 			if [ -d "$DOTENV_MANAGED" ]; then
 				dotenv_info "Reverting applied profile"
 				dotenv_profile_revert
@@ -48,16 +51,19 @@ function command-dotenv {
 			fi
 			exit 0
 			;;
+		-*)
+			dotenv_fail "Invalid option '$1'. Use --help to see the valid options" >&2
+			;;
 		*)
 			dotenv_info "Applying profile $1"
-			dotenv_profile_apply $1
+			dotenv_profile_apply "$1"
 			exit 0
 			;;
 		esac
 		shift
 	done
 	if [ -d "$DOTENV_MANAGED" ]; then
-		dotenv_managed_list
+		dotenv_manage_list | column -ts→
 		exit 0
 	else
 		dotenv_info "No active profile, run dotenv with one of:"
@@ -66,13 +72,56 @@ function command-dotenv {
 	fi
 }
 
-
 function command-dotenv-manage {
-	dotenv_managed_add "$1"
-}
+# Lists the available profiles
+# -l --list PROFILE
 
-function command-dotenv-unmanage {
-	dotenv_managed_remove "$1"
+	if [ -z "$DOTENV_PROFILES" ]; then
+		dotenv_fail "Environment variable DOTENV_PROFILES not defined"
+	fi
+
+	while [ "$#" -gt 0 ]
+	do
+		case "$1" in
+		-h|--help)
+			dotenv_output "TODO: Usage"
+			;;
+		-l|--list)
+			shift
+			if [ -z "$*" ]; then
+				dotenv_manage_list | column -ts →
+			else
+				dotenv_profile_managed "$1" | column -ts →
+			fi
+			exit 0
+			;;
+		-L|--ls)
+			shift
+			if [ -z "$*" ]; then
+				dotenv_manage_list | column -ts →
+			else
+				ls -l $DOTENV_PROFILES/$1
+			fi
+			exit 0
+			;;
+		-u|--update)
+			dotenv_fail "Not implemented yet"
+			;;
+		-r|--remove)
+			shift
+			dotenv_manage_remove "$*"
+			exit 0
+			;;
+		-*)
+			dotenv_fail "Invalid option '$1'. Use --help to see the valid options" >&2
+			;;
+		*)
+			dotenv_manage_add "$*"
+			exit 0
+			;;
+		esac
+		shift
+	done
 }
 
 function command-dotenv-managed {
