@@ -19,9 +19,12 @@ This makes `dotenv` best suited for environments where many developers want to
 share a common setup, while allowing  for individual configuration and 
 customization.
 
+`dotenv` also works well in a single-user setup where you have multiple
+environments on the same machine, or an environment with machine-specific changes.
+
 Features:
 
-- **Profile templates**: dotfiles templates can be combined and filled-in
+- **Profile templates**: dotfiles templates can be combined and filled in
   with profile-specific variables.
 
 - **Multiple profiles**: instantly switch between different sets of dotfiles
@@ -66,7 +69,7 @@ with a dot. By default, profiles are stored in `~/.dotenv/profiles` and your
 **active profile** is symlinked to `~/.dotenv/active`.
 
 Now, imagine that you're working at a company that has some default
-configuration files (shell setup, editor defaults, git/hgrc, etc), and that
+configuration files (shell setup, editor defaults, gitrc/hgrc, etc), and that
 you'd like to bring your own dotfiles as well. Without dotenv, you'd copy the
 files and edit them locally. But what happens if you've updated your dotfiles at 
 home and would like to propagate the update to the files at work? What if the
@@ -124,12 +127,13 @@ the variables to be expanded when updating a template file.
 Now we have a configurable `~/.hgrc` file that is always going to be in
 sync with upstream updates. But what if you'd like to add your own customization
 to the `~/.hgrc` file? If you edit it manually, it might be overridden by a future
-update (or at least, create a conflict). Ideally, you woul
+update (or at least, create a conflict). Ideally, you would
 combine the company template file with you own personal extensions. Dotenv
 makes it possible with **file fragments**. A file fragment is defined in a
 *profile* or a *profile template* and is suffixed with `.pre`, `.post` or
-`.pre.N`, `.post.N` (where `N` is a number). When applying a profile, dotenv
-will *assemble* the fragments into one file:
+`.pre.N`, `.post.N` (where `N` is a number).
+
+When applying a profile, dotenv will *assemble* the fragments into one file:
 
 ```
 $ dotenv-apply
@@ -183,10 +187,12 @@ Here's a table that illustrates how the dotfiles are built:
 
 ### Create a customizable company profile 
 
-
 ## Command-line reference
 
 ### Profiles
+
+- `dotenv --create PROFILE?` ― creates the profile with the given name,
+   using "`default`" in case `PROFILE` is not specified.
 
 - `dotenv PROFILE` ― activates the given PROFILE, which will then
    be located at `~/.dotenv/profile/active`. Any file overridden by
@@ -205,13 +211,19 @@ Here's a table that illustrates how the dotfiles are built:
 
 - `dotenv-manage FILE…` ― adds the given files to the given profile, moving
    them to the profile directory (`~/.dotenv/profile/active`) and creating
-   symlinks in place of them.
+   symlinks in place of them. Symlinks will also be created to `~/.dotenv/managed`
+   if the file is not a template.
 
 - `dotenv-manage -r|--remove FILE…` ― moves the file back from the profile directory
   to their canonical location.
 
 - `dotenv-manage -l|--list PROFILE?` ― outputs the list of files managed by the given
    profile, or the active profile by default.
+
+   ```
+   ~/.bashrc  | ~/.dotenv/profile/default/bashrc
+   ~/.inputrc | ~/.dotenv/profile/default/inputrc
+   ```
 
 - `dotenv-manage -u|--update` ― updates the files managed by the active profile.
 

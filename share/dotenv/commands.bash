@@ -39,6 +39,10 @@ function command-dotenv {
 			dotenv_profile_list
 			exit 0
 			;;
+		-c|--create)
+			dotenv_profile_create "$2"
+			exit 0
+			;;
 		-u|--update)
 			dotenv_fail "Not implemented yet"
 			;;
@@ -55,9 +59,15 @@ function command-dotenv {
 			dotenv_fail "Invalid option '$1'. Use --help to see the valid options" >&2
 			;;
 		*)
-			dotenv_info "Applying profile $1"
-			dotenv_profile_apply "$1"
-			exit 0
+			if [ -e "$DOTENV_PROFILES/$1" ]; then
+				dotenv_info "Applying profile $1"
+				dotenv_profile_apply "$1"
+				exit 0
+			else
+				dotenv_error "Profile does not exist: $1. Use one of:"
+				dotenv_list "$(dotenv_profile_list)"
+				exit 1
+			fi
 			;;
 		esac
 		shift
@@ -65,43 +75,49 @@ function command-dotenv {
 	if [ -d "$DOTENV_MANAGED" ]; then
 		dotenv_manage_list | column -ts→
 		exit 0
-	else
+	elif [ ! -d "$DOTENV_PROFILES" ]; then
+		dotenv_info "No profile defined in $DOTENV_PROFILES"
+		dotenv_info "Use \`dotenv --create PROFILE\` to create a profile with the given name"
+	elif [ ! -d "$DOTENV_ACTIVE" ]; then
 		dotenv_info "No active profile, run dotenv with one of:"
 		dotenv_list "$(dotenv_profile_list)"
+	else
+		dotenv_info "No managed files in profile $(dotenv_profile_active)"
+		dotenv_info "Add files with: \`dotenv-manage FILES…\`"
 		exit 0
 	fi
 }
 
 function command-dotenv-manage {
-# Lists the available profiles
-# -l --list PROFILE
-
+# Lists the managed files
+# -l --list PROFILE?
 	if [ -z "$DOTENV_PROFILES" ]; then
 		dotenv_fail "Environment variable DOTENV_PROFILES not defined"
 	fi
-
+	if [ "$#" -eq 0 ]; then
+		command-dotenv-manage --list
+		exit 0
+	fi
 	while [ "$#" -gt 0 ]
 	do
 		case "$1" in
 		-h|--help)
-			dotenv_output "TODO: Usage"
+			echo "Usage: dotenv-manage [OPTION] PROFILE|FILE…"
+			echo "Lists, adds and remove files managed by dotenv"
+			echo 
+			echo "                       Manages the given files with dotenv"
+			echo " -l, --list            Lists the files managed by the current PROFILE "
+			echo " -u, --update          TODO"
+			echo " -r, --remove          TODO"
+			exit 0
 			;;
 		-l|--list)
 			shift
+			local ACTIVE_PROFILE="$1"
 			if [ -z "$*" ]; then
-				dotenv_manage_list | column -ts →
-			else
-				dotenv_profile_managed "$1" | column -ts →
+				ACTIVE_PROFILE=$(dotenv_profile_active)
 			fi
-			exit 0
-			;;
-		-L|--ls)
-			shift
-			if [ -z "$*" ]; then
-				dotenv_manage_list | column -ts →
-			else
-				ls -l $DOTENV_PROFILES/$1
-			fi
+			dotenv_profile_managed "$ACTIVE_PROFILE" | column -ts →
 			exit 0
 			;;
 		-u|--update)
@@ -124,19 +140,20 @@ function command-dotenv-manage {
 	done
 }
 
-function command-dotenv-managed {
-	if [ -z "$DOTENV_PROFILES" ]; then
-		dotenv_error "Environment variable DOTENV_PROFILES not defined"
-	elif [ -z "$1" ]; then
-		dotenv_managed_list
-		exit 0
-	else
-		for FILE in $(dotenv_profile_manifest "$1"); do
-			echo "~/${FILE#$HOME/} → ~/.${FILE#$DOTENV_PROFILES/$1/}"
-		done
-		exit 0
-	fi
-}
+# FIXME: Replaced by dotenv-manage -l
+# function command-dotenv-managed {
+# 	if [ -z "$DOTENV_PROFILES" ]; then
+# 		dotenv_error "Environment variable DOTENV_PROFILES not defined"
+# 	elif [ -z "$1" ]; then
+# 		dotenv_managed_list
+# 		exit 0
+# 	else
+# 		for FILE in $(dotenv_profile_manifest "$1"); do
+# 			echo "~/${FILE#$HOME/} → ~/.${FILE#$DOTENV_PROFILES/$1/}"
+# 		done
+# 		exit 0
+# 	fi
+# }
 
 # -----------------------------------------------------------------------------
 #

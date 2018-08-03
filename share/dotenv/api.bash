@@ -32,9 +32,20 @@ function dotenv_info {
 	echo "$*"
 }
 
+function dotenv_action {
+## Suggests the next action to be taken by the user
+	# TODO: Should output in green or blue
+	echo "$*"
+}
+
 function dotenv_error {
 	# TODO: Should output in red
-	echo "$*"
+	(>&2 echo "$*")
+}
+
+function dotenv_warning {
+	# TODO: Should output in red
+	(>&2 echo "$*")
 }
 
 function dotenv_list {
@@ -44,8 +55,8 @@ function dotenv_list {
 }
 
 function dotenv_fail {
-	echo "$*"
-	exit -1
+	(>&2 echo "$*")
+	exit 1
 }
 
 function dotenv_output {
@@ -67,6 +78,19 @@ function dotenv_assert_active {
 # -----------------------------------------------------------------------------
 
 
+function dotenv_profile_create {
+## Creates the profile with the given name if not already there
+	local PROFILE_NAME="$1"
+	if [ -z "$PROFILE_NAME" ]; then
+		PROFILE_NAME="default"
+	fi
+	dotenv_info "Created profile: $PROFILE_NAME"
+	local PROFILE_PATH="$DOTENV_PROFILES/$PROFILE_NAME"
+	if [ ! -d "$PROFILE_PATH" ]; then
+		mkdir -p "$PROFILE_PATH"
+	fi
+}
+
 function dotenv_profile_active {
 	if [ -e "$DOTENV_ACTIVE" ]; then
 		dotenv_output $(basename $(readlink "$DOTENV_ACTIVE"))
@@ -82,16 +106,34 @@ find -L "$DOTENV_PROFILES/$1" -name "*" -not -type d -not -name "$DOTENV_CONFIG"
 }
 
 function dotenv_profile_managed {
+## Lists the managed by the given profile (active profile by default)
+	# TODO: Format should be
+	# HOME PATH ; MANAGED PATH ; SOURCES
+	# For instance
+	# ~/.bashrc | ~/.dotenv/managed/bashrc | ~/.dotenv/templates/default/bashrc.pre ~/.dotenv/profiles/default/bashrc.post
 	local PROFILE="$1"
-	local PROFILE_BASE="$DOTENV_PROFILES/$1"
+	if [ -z "$PROFILE" ]; then
+		dotenv_error "No active profile selected"
+		exit 1
+	fi
+	local PROFILE_BASE="$DOTENV_PROFILES/$1/"
 	for FILE in $(dotenv_profile_manifest "$1"); do
-		local FILE_NAME=${FILE#$PROFILE_BASE/}
+		local FILE_NAME=${FILE#$PROFILE_BASE}
+		local FILE_SOURCES="${FILE}"
+		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
+		if [ ! -e "$FILE_MANAGED" ]; then
+			# NOTE: This happens if the managed directory has been
+			# tampered with. We should probably restore the file at that
+			# point.
+			dotenv_warning "Missing managed file: $FILE_MANAGED"
+		fi
+		# TODO: What about *.pre and *.post?
 		case "$FILE_NAME" in
 			*.tmpl)
-				echo ~/."${FILE_NAME%.tmpl}"
+				echo "~/.${FILE_NAME%.tmpl}	$FILE_MANAGED	$FILE_SOURCES"
 				;;
 			*)
-				echo ~/."$FILE_NAME"
+				echo "~/.$FILE_NAME	$FILE_MANAGED	$FILE_SOURCES"
 				;;
 		esac
 	done
@@ -139,8 +181,8 @@ function dotenv_profile_apply {
 	for FILE in $(dotenv_profile_manifest "$1"); do
 		# This defines the different paths for the file. The SUFFIX
 		# is local to the profile, the $TARGET is the dotfile within
-		# the HOME directory, the FILE_MANAGED is the build file that
-		# is symlinked to the HOME and the FILE_BACKUP is the file in
+		# the DOTENV_USER_HOME directory, the FILE_MANAGED is the build file that
+		# is symlinked to the DOTENV_USER_HOME and the FILE_BACKUP is the file in
 		# the backup directory.
 		SUFFIX=${FILE#$DOTENV_PROFILES/$1/}
 		TARGET=$DOTENV_USER_HOME/.$SUFFIX
@@ -211,6 +253,30 @@ function dotenv_profile_apply {
 	ln -sfr "$DOTENV_PROFILES/$1" "$DOTENV_ACTIVE"
 }
 
+function dotenv_backup_file {
+## @param FILE* the files to backup
+## Backs up the given file by moving them to `$DOTENV_BACKUP`.
+	for FILE in "$@"; do
+		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+		local PARENT_NAME=$(dirname "$FILE_NAME")
+		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
+		local FILE_BACKUP_PARENT="$DOTENV_BACKUP/$PARENT_NAME"
+		if [ -e "$FILE_BACKUP" ]; then
+			# If the backup already exist, we make the process fail.
+			dotenv_fail "File backup already exists: $FILE_BACKUP"
+		fi
+		# We create the parent directory if needed.
+		if [ ! -d "$FILE_BACKUP_PARENT" ]; then
+			# We create the parent directory in backup and make sure that
+			# we preserve the attributes
+			mkdir -p "$FILE_BACKUP_PARENT"
+			cp -a $(dirname "$FILE") "$FILE_BACKUP_PARENT"
+		fi
+		# And now we can backup the file
+		mv "$FILE" "$FILE_BACKUP"
+	done
+}
+
 function dotenv_backup_restore {
 ## Moves back every single file in $DOTENV_BACKUP to its original location
 ## in $DOTENV_USER_HOME. Empty directories will be pruned, which should
@@ -232,7 +298,7 @@ function dotenv_backup_restore {
 			fi
 			dotenv_info "restored $TARGET"
 		done
-		# We remove empty directories
+		# We remove empty directories from the backup
 		dotenv_dir_clean "$DOTENV_BACKUP"
 		if [ -e "$DOTENV_BACKUP" ] ; then
 			dotenv_error "Could not fully restore backup, some files already exist:"
@@ -256,56 +322,112 @@ function dotenv_manage_list {
 			local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 			local FILE_FRAGMENTS=$(dotenv_file_fragments "$FILE_ACTIVE")
 			echo "$FILE_FRAGMENTS"
-			#echo ~/.${FILE#$DOTENV_MANAGED/}→~/${FILE#$HOME/}→$(readlink ~/${FILE#$HOME/})
+			#echo ~/.${FILE#$DOTENV_MANAGED/}→~/${FILE#$DOTENV_USER_HOME/}→$(readlink ~/${FILE#$DOTENV_USER_HOME/})
 		done
 	fi
 }
 
+
+# NOTE: This function is complex and critical, it must be edited with care.
 function dotenv_manage_add {
+## Adds the given FILES as managed files. This requires an active profile.
 	dotenv_assert_active
-	for FILE in $*; do
-		local FILE_NAME="${FILE#$HOME/.}"
+	if [ ! -e "$DOTENV_MANAGED" ]; then
+		mkdir -p "$DOTENV_MANAGED"
+	fi
+	for FILE in "$@"; do
+		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
+		# NOTE: This might be better using a function call
 		local FILE_ACTIVE_FRAGMENTS=$(find "$DOTENV_ACTIVE" -name "$FILE_NAME" -name "$FILE_NAME.tmpl" -name "$FILE_NAME.pre" -name "$FILE_NAME.post" -name "$FILE_NAME.pre.*" -name "$FILE_NAME.post.*")
 		# Is the file already managed?
 		if [ -e "$FILE_MANAGED" ]; then
-			# TODO: Maybe detect conflicts?
-			dotenv_info "File already managed: $FILE → $FILE_MANAGED"
+			# If the file is already managed, we can try to backup the 
+			# file and deploy our managed version.
+			dotenv_error "File already managed, : $FILE → $FILE_MANAGED"
+			dotenv_action "Use dotenv-manage -o $FILE to backup $FILE and deploy the managed version" 
 		# Is there a file in the active profile?
 		elif [ -e "$FILE_ACTIVE" ]; then
+			# The file is not managed yet (which means something failed before)
+			# so we re-apply the rules to create the managed file (if any)
 			dotenv_info "File already exists in active profile: $FILE → $FILE_ACTIVE"
-			ln -sfr $(dotenv_manage_apply "$FILE") "$FILE"
-		# Is there any fragment in the active profile?
-		elif [ "FILE_ACTIVE_FRAGMENTS" == "" ]; then
-			dotenv_info "File has active fragments: $FILE_ACTIVE_FRAGMENTS"
-		# If not' we're good to go
+			dotenv_action "Use dotenv-manage -o $FILE to backup $FILE and deploy the managed version" 
+		# Is there any fragment in the active profile, but not the file itself?
+		elif [ "$FILE_ACTIVE_FRAGMENTS" != "" ]; then
+			# It's the same as above, but with a file that only has fragments
+			# ie `NAME.pre` but not `NAME`.
+			dotenv_info "File already exists in active profile: $FILE → $FILE_ACTIVE"
+			dotenv_action "Use dotenv-manage -o $FILE to backup $FILE and deploy the managed version" 
+		# Is there a file already in the backup?
+		elif [ -e "$FILE_BACKUP" ]; then
+			# If so, we need user intervention to do something with the backup
+			# either delete it or restore it.
+			dotenv_info "File already exists in $FILE_BACKUP."
+			dotenv_action "Remove or restore the backup file and try again"
 		else
-			mv "$FILE" "$FILE_ACTIVE"
-			ln -sfr "$FILE_ACTIVE" "$FILE"
-			dotenv_manage_apply "$FILE"
+			# Here we know that the file is not managed and does not exist
+			# in the active profile, and has no existing backup.
+			# We create the file in the active profile. We copy its contents
+			local FILE_CANONICAL=$(readlink -f "$FILE")
+			if [ -d "$FILE_CANONICAL" ]; then
+				dotenv_error "Given file is a directory. Dotenv can only manage files."
+				exit 1
+			else
+				# We create a copy of the canonical file. "cp -a" might
+				# actually be enough.
+				cat "$FILE_CANONICAL" > "$FILE_ACTIVE"
+				cp --attributes-only "$FILE" "$FILE_ACTIVE"
+				# We recreate the managed file (in case there are fragments/templates)
+				dotenv_manage_make "$FILE"
+				# We finally create a symlink between the managed path
+				dotenv_manage_apply "$FILE"
+			fi
 		fi
 	done
 }
 
 function dotenv_manage_remove {
 	for FILE in $*; do
-		echo "unmanage $FILE"
+		FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+		FILE_MANAGED="${DOTENV_MANAGED}/$FILE_NAME"
+		FILE_BACKUP="{DOTENV_BACKUP}/$FILE_NAME"
+		if [ -e "$FILE_BACKUP" ]; then
+			# Do we have a backup for the file? That's the expected
+			# behaviour.
+			FILE="$FILE"
+		elif [ -e "$FILE_MANAGED" ]; then
+			# We don't have backup, but we should have the managed
+			# file, which we can move back
+			FILE="$FILE"
+		else
+			dotenv_error "No backup ($FILE_BACKUP) or managed file ($FILE_MANAGED) for: $FILE"
+		fi
 	done
 } 
 
-function dotenv_manage_apply {
+function dotenv_manage_make {
+## @param FILES* these paths are relative to home
+## @output:stdout The path for each managed file corresponding to the given path
+##
+## Looks for each of the given `FILE`s in the active profile, and links
+## the file or assembles its fragments into `~/.dotenv/managed`, output.
 	dotenv_assert_active
-	for FILE in $*; do
-		local FILE_NAME="${FILE#$HOME/.}"
+	for FILE in "$@"; do
+		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 		if [ -e "$FILE" ]; then
-			local FILE_ORIGIN=(readlink -f "$FILE")
+			FILE=$(readlink -f "$FILE")
+		elif [ -z "$(dotenv_file_fragment_types)" ]; then
+			dotenv_error "$FILE does not exist in active profile: $FILE_ACTIVE"
+			exit 1
 		else
 			echo dotenv_file_assemble "$FILE_ACTIVE_FRAGMENTS" "$FILE_MANAGED"
 		fi
-		# If there is only one regular file as a fragment, we include it
+		# If there is only one regular file as a fragment, we symlink from
+		# the active profile to the managed.
 		if [ "$(dotenv_file_fragment_types "$FILE_ACTIVE")" == "f" ]; then
 			ln -sfr "$FILE_ACTIVE" "$FILE_MANAGED"
 		# Otherwise we assembe it
@@ -317,6 +439,18 @@ function dotenv_manage_apply {
 			dotenv_file_assemble "$FILE_ACTIVE" > "$FILE_MANAGED"
 		fi
 		echo "$FILE_MANAGED"
+	done
+}
+
+function dotenv_manage_apply {
+## @param FILES relative to $DOTENV_USER_HOME that needs to be applied
+##        from the $DOTENV_MANAGED directory.
+	dotenv_assert_active
+	for FILE in "$@"; do
+		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
+		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
+
 	done
 }
 
@@ -494,7 +628,6 @@ function dotenv_template_link_files {
 #
 # -----------------------------------------------------------------------------
 
-
 function dotenv_dir_list {
 	local ALL
 	ALL=$(echo "$1"/*)
@@ -504,15 +637,20 @@ function dotenv_dir_list {
 }
 
 function dotenv_dir_clean {
+## @param PATH
+##
+## Removes any empty directory at the given `PATH`
 	# This makes sure that the suffix is not the home directory
 	DIRPATH=$(readlink -f "$1")
-	SUFFIX=${DIRPATH#$HOME}
+	SUFFIX=${DIRPATH#$DOTENV_USER_HOME}
 	if [ -d "$DIRPATH" ] && [ "$SUFFIX" != "" ] && [ "$SUFFIX" != "/" ]; then
 		find "$DIRPATH" -depth -type d -empty -exec rmdir '{}' ';'
 	fi
 }
 
-function dotenv_file_pre {
+function dotenv_file_pre_list {
+## Lists the `.pre.*` fragments for the given file, if any. The files
+## need to exist to be listed.
 	for PRE in $1.pre $1.pre.*; do
 		if [ -e "$PRE" ]; then
 			echo "PRE"
@@ -520,7 +658,9 @@ function dotenv_file_pre {
 	done
 }
 
-function dotenv_file_post {
+function dotenv_file_post_list {
+## Lists the `.post.*` fragments for the given file, if any. The files need
+## to exists to be listed.
 	for POST in $1.post $1.post.*; do
 		if [ -e "$POST" ]; then
 			echo "$POST"
@@ -528,16 +668,21 @@ function dotenv_file_post {
 	done
 }
 
-function dotenv_file_fragments {
-	dotenv_file_pre  "$1"
+function dotenv_file_fragments_list {
+## Lists the file fragments used to assemble the given file. This looks
+## for  `*.pre.*` and `*.post.*` files and outputs them in order.
+	dotenv_file_pre_list  "$1"
 	if [ -e "$1" ]; then
 		echo "$1"
 	fi
-	dotenv_file_post "$1"
+	dotenv_file_post_list "$1"
 }
 
 function dotenv_file_fragment_types {
-	for FRAGMENT in $(dotenv_file_fragments "$1"); do
+## Returns a string combining the different types of fragments that 
+## create the given file. Template fragments will produce a `T`, 
+## while file fragments will produce an `f`.
+	for FRAGMENT in $(dotenv_file_fragments_list "$1"); do
 		case "$FRAGMENT" in
 			*.tmpl|*.tmpl.pre|*.tmpl.pre.*|*.tmpl.post|*.tmpl.post.*)
 				echo -n "T"
@@ -550,8 +695,12 @@ function dotenv_file_fragment_types {
 }
 
 function dotenv_file_assemble {
+## @param FILE the path of the file fragments to assemble.
+## @output:stdout The assembled file
+##
 ## Takes a path to a `FILE` and combines any `pre` or `post` files found
-## around it.
+## around it, making sure that any template file is expanded. The result
+## is output to stdout.
 	for FRAGMENT in $(dotenv_file_fragments "$1"); do
 		case "$FRAGMENT" in
 			*.tmpl|*.tmpl.pre|*.tmpl.pre.*|*.tmpl.post|*.tmpl.post.*)
@@ -565,6 +714,10 @@ function dotenv_file_assemble {
 }
 
 function dotenv_tmpl_apply {
+## @param FILE
+## @param CONFIG
+## @output:stdout The template file expanded with the given `CONFIG`
+##
 ## Takes a path to a `.tmpl` `FILE` and a path to a `CONFIG` file that defines
 ## environment variables that will then be replaces in the `TEMPLATE`. Any
 ## expression like `${NAME}` is going to be expanded with the value of
