@@ -102,7 +102,7 @@ function dotenv_profile_active {
 function dotenv_profile_manifest {
 ## Lists the files defined in the given `profile`.
 ## @param profile
-find -L "$DOTENV_PROFILES/$1" -name "*" -not -type d -not -name "$DOTENV_CONFIG" -not -name "*.post" -not -name "*.pre" -not -name "*.pre.*" -not -name "*.post.*"
+	find -L "$DOTENV_PROFILES/$1" -name "*" -not -type d -not -name "$DOTENV_CONFIG" -not -name "*.post" -not -name "*.pre" -not -name "*.pre.*" -not -name "*.post.*"
 }
 
 function dotenv_profile_managed {
@@ -112,6 +112,7 @@ function dotenv_profile_managed {
 	# For instance
 	# ~/.bashrc | ~/.dotenv/managed/bashrc | ~/.dotenv/templates/default/bashrc.pre ~/.dotenv/profiles/default/bashrc.post
 	local PROFILE="$1"
+	local FILE
 	if [ -z "$PROFILE" ]; then
 		dotenv_error "No active profile selected"
 		exit 1
@@ -141,6 +142,7 @@ function dotenv_profile_managed {
 
 function dotenv_profile_list {
 	local ALL
+	local NAME
 	if [ -z "$DOTENV_PROFILES" ]; then
 		dotenv_error "Environemnt variable DOTENV_PROFILES not defined"
 	elif [ "$ALL" = "$DOTENV_PROFILES/*" ]; then
@@ -177,6 +179,7 @@ function dotenv_profile_apply {
 ## @param profile
 	# We revert any previously applied profile
 	dotenv_profile_revert
+	local FILE
 	# Now we iterate on all the files that are part of the current profile
 	for FILE in $(dotenv_profile_manifest "$1"); do
 		# This defines the different paths for the file. The SUFFIX
@@ -184,12 +187,12 @@ function dotenv_profile_apply {
 		# the DOTENV_USER_HOME directory, the FILE_MANAGED is the build file that
 		# is symlinked to the DOTENV_USER_HOME and the FILE_BACKUP is the file in
 		# the backup directory.
-		SUFFIX=${FILE#$DOTENV_PROFILES/$1/}
-		TARGET=$DOTENV_USER_HOME/.$SUFFIX
-		FILE_MANAGED=$DOTENV_MANAGED/$SUFFIX
-		FILE_BACKUP=$DOTENV_BACKUP/$SUFFIX
-		DIR_BACKUP=$(dirname "$DOTENV_BACKUP/$SUFFIX")
-		EXT="${FILE##*.}"
+		local SUFFIX=${FILE#$DOTENV_PROFILES/$1/}
+		local TARGET=$DOTENV_USER_HOME/.$SUFFIX
+		local FILE_MANAGED=$DOTENV_MANAGED/$SUFFIX
+		local FILE_BACKUP=$DOTENV_BACKUP/$SUFFIX
+		local DIR_BACKUP=$(dirname "$DOTENV_BACKUP/$SUFFIX")
+		local EXT="${FILE##*.}"
 		# Template (*.tmpl) files have their extension removed
 		if [ "$EXT" = "tmpl" ]; then
 			TARGET=${TARGET%.*}
@@ -225,7 +228,7 @@ function dotenv_profile_apply {
 		# file.
 		if [ "$EXT" = "tmpl" ]; then
 			if [ "$(dotenv_file_fragments "$FILE")" = "" ]; then
-				TEMP=$(mktemp)
+				local TEMP=$(mktemp)
 				dotenv_file_assemble "$FILE" > "$TEMP"
 				dotenv_tmpl_apply "$TEMP" "$DOTENV_PROFILES/$1/config.dotenv.sh" > "$FILE_MANAGED"
 				unlink "$TEMP"
@@ -256,6 +259,7 @@ function dotenv_profile_apply {
 function dotenv_backup_file {
 ## @param FILE* the files to backup
 ## Backs up the given file by moving them to `$DOTENV_BACKUP`.
+	local FILE
 	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local PARENT_NAME=$(dirname "$FILE_NAME")
@@ -270,7 +274,7 @@ function dotenv_backup_file {
 			# We create the parent directory in backup and make sure that
 			# we preserve the attributes
 			mkdir -p "$FILE_BACKUP_PARENT"
-			cp -a $(dirname "$FILE") "$FILE_BACKUP_PARENT"
+			cp -a "$(dirname "$FILE")" "$FILE_BACKUP_PARENT"
 		fi
 		# And now we can backup the file
 		mv "$FILE" "$FILE_BACKUP"
@@ -281,12 +285,13 @@ function dotenv_backup_restore {
 ## Moves back every single file in $DOTENV_BACKUP to its original location
 ## in $DOTENV_USER_HOME. Empty directories will be pruned, which should
 ## result in $DOTENV_BACKUP to not exit at the end.
+	local FILE
 	if [ -d "$DOTENV_BACKUP" ]; then
 		# For each file in the backup directory
 		for FILE in $(find "$DOTENV_BACKUP" -name "*" -not -type d); do
 			# We determine the target directory
-			TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_BACKUP/}
-			TARGET_DIR=$(dirname "$TARGET")
+			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_BACKUP/}
+			local TARGET_DIR=$(dirname "$TARGET")
 			if [ ! -d "$TARGET_DIR" ]; then
 				mkdir -p "$TARGET_DIR"
 			fi
@@ -315,14 +320,14 @@ function dotenv_backup_restore {
 
 function dotenv_manage_list {
 ## Lists the files currently managed by dotenv
+	local FILE
 	if [ -e "$DOTENV_MANAGED" ]; then
 		for FILE in $(find $DOTENV_MANAGED -name "*" -not -type d ); do
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
 			local HOME_NAME=~/.$FILE_NAME
 			local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 			local FILE_FRAGMENTS=$(dotenv_file_fragments "$FILE_ACTIVE")
-			echo "$FILE_FRAGMENTS"
-			#echo ~/.${FILE#$DOTENV_MANAGED/}→~/${FILE#$DOTENV_USER_HOME/}→$(readlink ~/${FILE#$DOTENV_USER_HOME/})
+			echo ~/.${FILE#$DOTENV_MANAGED/}→~/${FILE#$DOTENV_USER_HOME/}→$(readlink ~/${FILE#$DOTENV_USER_HOME/})
 		done
 	fi
 }
@@ -335,6 +340,7 @@ function dotenv_manage_add {
 	if [ ! -e "$DOTENV_MANAGED" ]; then
 		mkdir -p "$DOTENV_MANAGED"
 	fi
+	local FILE
 	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
@@ -346,8 +352,12 @@ function dotenv_manage_add {
 		if [ -e "$FILE_MANAGED" ]; then
 			# If the file is already managed, we can try to backup the 
 			# file and deploy our managed version.
-			dotenv_error "File already managed, : $FILE → $FILE_MANAGED"
-			dotenv_action "Use dotenv-manage -o $FILE to backup $FILE and deploy the managed version" 
+			if [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
+				dotenv_error "File is already managed : $FILE ← $FILE_MANAGED"
+			else
+				dotenv_error "File conflicts with managed file: $FILE_MANAGED"
+				dotenv_action "Use managed version: dotenv-manage -o $FILE" 
+			fi
 		# Is there a file in the active profile?
 		elif [ -e "$FILE_ACTIVE" ]; then
 			# The file is not managed yet (which means something failed before)
@@ -389,10 +399,11 @@ function dotenv_manage_add {
 }
 
 function dotenv_manage_remove {
-	for FILE in $*; do
-		FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
-		FILE_MANAGED="${DOTENV_MANAGED}/$FILE_NAME"
-		FILE_BACKUP="{DOTENV_BACKUP}/$FILE_NAME"
+	local FILE
+	for FILE in "$@" ; do
+		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+		local FILE_MANAGED="${DOTENV_MANAGED}/$FILE_NAME"
+		local FILE_BACKUP="{DOTENV_BACKUP}/$FILE_NAME"
 		if [ -e "$FILE_BACKUP" ]; then
 			# Do we have a backup for the file? That's the expected
 			# behaviour.
@@ -414,6 +425,7 @@ function dotenv_manage_make {
 ## Looks for each of the given `FILE`s in the active profile, and links
 ## the file or assembles its fragments into `~/.dotenv/managed`, output.
 	dotenv_assert_active
+	local FILE
 	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
@@ -445,13 +457,82 @@ function dotenv_manage_make {
 function dotenv_manage_apply {
 ## @param FILES relative to $DOTENV_USER_HOME that needs to be applied
 ##        from the $DOTENV_MANAGED directory.
+##
+## Takes a file readily available in $DOTENV_MANAGED and installs it
+## in $DOTENV_USER_HOME. This requires that there is no existing backup
+## for the given file.
 	dotenv_assert_active
+	local FILE
 	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
-
+		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
+		if [ "$FILE" != "$DOTENV_USER_HOME/.$FILE_NAME" ]; then
+			# NOTE: We might want to loosen that criteria
+			dotenv_fail "File is not a dotfile: $FILE"
+		else
+			if [ ! -e "$FILE_MANAGED" ]; then
+				dotenv_fail "Managed file does not exist: $FILE_MANAGED"
+			fi
+			if [ "$(readlink "$FILE")" != "$FILE_MANAGED" ]; then
+				if [ ! -e "$FILE_BACKUP" ]; then
+					dotenv_fail "File already exists in the backup: $FILE_BACKUP"
+				fi
+				_dotenv_manage_apply "$FILE"
+			else
+				dotenv_backup_file "$FILE"
+				_dotenv_manage_apply "$FILE"
+			fi
+		fi
 	done
+}
+
+# NOTE: This is a HELPER function
+function _dotenv_manage_apply {
+## @helper
+## @param FILE the $DOTENV_USER_HOME file that will be updated with the
+##        corresponding $DOTENV_MANAGED file.
+##
+## This creates a symlink for the given FILE between $DOTENV_MANAGED 
+## and $DOTENV_USER_HOME, and creating parent directories (with permissions)
+## as necessary.
+	local FILE="$1"
+	local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+	local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
+	if [ "$FILE" == "$DOTENV_USER_HOME" ]; then
+		# Nothing to do in that case 
+		FILE="$FILE"
+	elif [ ! -z "$FILE_NAME" ]; then
+		local PARENT=$(dirname "$FILE")
+		# We ensure that the parent exists
+		if [ ! -z "$PARENT" ]; then
+			_dotenv_manage_apply "$PARENT"
+		fi
+		# Is the managed file a directory?
+		if [ -d "$FILE_MANAGED" ]; then
+			if [ ! -e "$FILE" ]; then
+				# NOTE: We don't need -p here as we've recursed on the parent
+				# already
+				mkdir "$FILE"
+				cp --attributes-only "$FILE_MANAGED" "$FILE"
+			fi
+		else
+			# Here the managed version is a file.
+			if [ ! -e "$FILE" ]; then
+				# If there's no target file, we link it
+				ln -sr "$FILE_MANAGED" "$FILE"
+			elif [ "$(readlink "$FILE")" != "$FILE_MANAGED" ]; then
+				# If there's a file and it's not a link to our
+				# managed file, we back it up.
+				dotenv_info "Backing up existing file $FILE to $FILE.bak"
+				# TODO: Improve this with suffixes if backups already
+				# present.
+				mv "$FILE" "$FILE".bak
+				ln -sr "$FILE_MANAGED" "$FILE"
+			fi
+		fi
+	fi
 }
 
 function dotenv_manage_revert {
@@ -459,9 +540,10 @@ function dotenv_manage_revert {
 ## file, the corresponding target file installed in $DOTENV_USER_HOME will be removed.
 ## This requires the target file to point back to the same file as the managed
 ## file. If not, this means the file was changed and the process will fail.
+	local FILE
 	if [ -d "$DOTENV_MANAGED" ]; then
 		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d); do
-			TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_MANAGED/}
+			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_MANAGED/}
 			if [ -e "$TARGET" ]; then
 				ACTUAL_ORIGIN=$(readlink -f "$TARGET")
 				EXPECTED_ORIGIN=$(readlink -f "$FILE")
@@ -516,6 +598,7 @@ function dotenv_configuration_create {
 ## Outputs a new configuration file for the template files in the given $DIRECTORY
 	echo "# Configuration extracted from template ${1#$DOTENV_TEMPLATES/} on $(date +'%F')"
 	echo "# Edit this file and fill in the variables"
+	local VARIABLE
 	for VARIABLE in $(dotenv_configuration_extract "$1"); do
 		echo "$VARIABLE="
 	done
@@ -537,11 +620,12 @@ function dotenv_configuration_delta {
 	echo "$CUR_VARS" > "$CUR_TMP"
 	local MISSING=$(diff "$DIR_TMP" "$CUR_TMP" | grep '< ' | cut -d' ' -f 2)
 	local EXTRA=$(diff "$DIR_TMP" "$CUR_TMP" | grep '> ' | cut -d' ' -f 2)
-	rm $DIR_TMP $CUR_TMP
+	rm "$DIR_TMP" "$CUR_TMP"
 	if [ ! -z "$MISSING" ] || [ ! -z "$EXTRA" ]; then
 		echo "# ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――"
 		echo "# Configuration updated from template ${1#$DOTENV_TEMPLATES/} on $(date +'%F')"
 		echo "# The following variables are new:"
+		local VARIABLE
 		for VARIABLE in $MISSING; do
 			echo "$VARIABLE="
 		done
@@ -580,6 +664,8 @@ function dotenv_template_link_files {
 ## TARGET directory. Any file that is not a symlink and already exists
 ## in the target will be left as-is.
 	local ALL
+	local FILE
+	local SUFFIX
 	local TEMPLATE=$1
 	local TARGET=$2
 	# We list all the files in the template directory, ignoring
@@ -594,10 +680,10 @@ function dotenv_template_link_files {
 		else
 			SUFFIX="${FILE#$DOTENV_TEMPLATES/$TEMPLATE/}"
 		fi
-		DEST_FILE="$TARGET/$SUFFIX"
+		local DEST_FILE="$TARGET/$SUFFIX"
 		if [ ! -z "$SUFFIX" ]; then
 			# We get the parent directory and create it if necessessary
-			TARGET_PARENT=$(dirname "$DEST_FILE")
+			local TARGET_PARENT=$(dirname "$DEST_FILE")
 			if [ ! -z "$TARGET_PARENT" ] && [ ! -e "$TARGET_PARENT" ]; then
 				mkdir -p "$TARGET_PARENT"
 			fi
@@ -641,8 +727,8 @@ function dotenv_dir_clean {
 ##
 ## Removes any empty directory at the given `PATH`
 	# This makes sure that the suffix is not the home directory
-	DIRPATH=$(readlink -f "$1")
-	SUFFIX=${DIRPATH#$DOTENV_USER_HOME}
+	local DIRPATH=$(readlink -f "$1")
+	local SUFFIX=${DIRPATH#$DOTENV_USER_HOME}
 	if [ -d "$DIRPATH" ] && [ "$SUFFIX" != "" ] && [ "$SUFFIX" != "/" ]; then
 		find "$DIRPATH" -depth -type d -empty -exec rmdir '{}' ';'
 	fi
@@ -651,6 +737,7 @@ function dotenv_dir_clean {
 function dotenv_file_pre_list {
 ## Lists the `.pre.*` fragments for the given file, if any. The files
 ## need to exist to be listed.
+	local PRE
 	for PRE in $1.pre $1.pre.*; do
 		if [ -e "$PRE" ]; then
 			echo "PRE"
@@ -661,6 +748,7 @@ function dotenv_file_pre_list {
 function dotenv_file_post_list {
 ## Lists the `.post.*` fragments for the given file, if any. The files need
 ## to exists to be listed.
+	local POST
 	for POST in $1.post $1.post.*; do
 		if [ -e "$POST" ]; then
 			echo "$POST"
@@ -682,6 +770,7 @@ function dotenv_file_fragment_types {
 ## Returns a string combining the different types of fragments that 
 ## create the given file. Template fragments will produce a `T`, 
 ## while file fragments will produce an `f`.
+	local FRAGMENT
 	for FRAGMENT in $(dotenv_file_fragments_list "$1"); do
 		case "$FRAGMENT" in
 			*.tmpl|*.tmpl.pre|*.tmpl.pre.*|*.tmpl.post|*.tmpl.post.*)
@@ -701,6 +790,7 @@ function dotenv_file_assemble {
 ## Takes a path to a `FILE` and combines any `pre` or `post` files found
 ## around it, making sure that any template file is expanded. The result
 ## is output to stdout.
+	local FRAGMENT
 	for FRAGMENT in $(dotenv_file_fragments "$1"); do
 		case "$FRAGMENT" in
 			*.tmpl|*.tmpl.pre|*.tmpl.pre.*|*.tmpl.post|*.tmpl.post.*)
@@ -732,7 +822,7 @@ function dotenv_tmpl_apply {
 	else
 		# First, we get the list of fields from the $CONFIG file, which
 		# is supposed to be a shell script.
-		local FIELDS=$(cat "$CONFIG" | egrep "^(export\s*)?[A-Z_]+\\s*=" | cut -d= -f1 | xargs echo)
+		local FIELDS=$(grep -E "^(export\\s*)?[A-Z_]+\\s*=" "$CONFIG" | cut -d= -f1 | xargs echo)
 		# FIXME: We might want to backup the environment
 		# Now we source the data file. If this goes wrong, the script is
 		# probably going to stop.
