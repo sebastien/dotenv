@@ -179,80 +179,77 @@ Here's a table that illustrates how the dotfiles are built:
 
 ## Examples
 
-### Manage your configuration files on one machine
+### Manage my configuration files on one machine
+
+### Manage my configuration files on MANY machines
 
 ### Manage multiple profiles on one machine
 
-### Manage your configuration files on MANY machines
-
-### Create a customizable company profile 
+### Create a dotfile template for new members of an organization
 
 ## Command-line reference
 
 ### Profiles
 
-- `dotenv --create PROFILE?` ― creates the profile with the given name,
-   using "`default`" in case `PROFILE` is not specified.
-
 - `dotenv PROFILE` ― activates the given PROFILE, which will then
    be located at `~/.dotenv/profile/active`. Any file overridden by
    the profile will be backed up in `~/.dotenv/backup`.
 
-- `dotenv -r|--remove` ― removes any managed files and restores the files
-  in the state they were before dotenv was first run.
+- `dotenv --create PROFILE?` ― creates the profile with the given name,
+   using "`default`" in case `PROFILE` is not specified.
 
-- `dotenv -l|--list` ― outputs the name of the currently active profile
+- `dotenv -p|--profiles` ― lists the available profiles, where active
+   profiles are prefixed with `*`.
+
+- `dotenv -c|--configure PROFILE?` ― edits the profile's configuration and
+   re-generates any file that depends on the configuration.
+
+### Managing files
+
+- `dotenv -a|--add FILE…` ― adds the given dotfiles to the active profile, 
+   saving a backup of the original file.
+
+- `dotenv -r|--remove FILE…` ― removes the given managed files and restores the files
+  in the state they were before dotenv was first run.
 
 - `dotenv -u|--update` ― updates and rebuilds the managed files, making sure
   all the files are up to date.
 
+- `dotenv -l|--list` ― lists the files managed by the active profile.
 
-### Manage Files
+- `dotenv -e FILE…` ― edits the original file(s) that were used to create the
+  given files and re-apply the profile.
 
-- `dotenv-manage FILE…` ― adds the given files to the given profile, moving
-   them to the profile directory (`~/.dotenv/profile/active`) and creating
-   symlinks in place of them. Symlinks will also be created to `~/.dotenv/managed`
-   if the file is not a template.
+### Templates
 
-- `dotenv-manage -r|--remove FILE…` ― moves the file back from the profile directory
-  to their canonical location.
+Templates are similar to profiles (they contain a set of dotfiles), and can
+be combined with a profile.
 
-- `dotenv-manage -l|--list PROFILE?` ― outputs the list of files managed by the given
-   profile, or the active profile by default.
-
-   ```
-   ~/.bashrc  | ~/.dotenv/profile/default/bashrc
-   ~/.inputrc | ~/.dotenv/profile/default/inputrc
-   ```
-
-- `dotenv-manage -u|--update` ― updates the files managed by the active profile.
-
-### Apply Templates
-
-- `dotenv-apply TEMPLATE…` ―  applies the given template
+- `dotenv -A|--apply-template TEMPLATE…` ―  applies the given template
    to the given profile (active profile by default).
 
-- `dotenv-apply -r|--remove TEMPLATE…` ―  unapplies the given template from
+- `dotenv -R|--remove-template TEMPLATE…` ―  unapplies the given template from
   the active profile.
 
-- `dotenv-apply -l|--list` ―  lists the available templates
+- `dotenv -L|--list-templates` ―  lists the available templates
 
-- `dotenv-apply -l|--list TEMPLATE` ―  lists the files available in the given
+- `dotenv -L|--list-template TEMPLATE` ―  lists the files available in the given
   template.
-
-### Configuration
-
-- `dotenv-edit PROFILE?` ― edits the profile's configuration file and applies the templates again.
-
-- `dotenv-edit FILE…` ― edits the original file(s) that were used to create the
-  given files and re-apply the profile.
 
 ### Building and syncing
 
-- `dotenv-push PROFILE? TEMPLATE?` ― pushes the given profiles and/or templates
+NOTE: This needs to interface with a version control system.
+
+- `dotenv -s|--sync PUSH` ― pushes the given profiles and/or templates
    all by default.
 
-- `dotenv-pull PROFILE? TEMPLATE?` ― pulls the given profiles and/or templates,
+- `dotenv -s|--sync PULL ` ― pushes the given profiles and/or templates
+   all by default.
+
+- `dotenv -s|--sync SAVE PROFILE?` ― saves the changes made to the given 
+   profile.
+
+- `dotenv -P|push PROFILE? TEMPLATE?` ― pulls the given profiles and/or templates,
    all by default.
 
 ## Similar tools

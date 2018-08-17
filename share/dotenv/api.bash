@@ -157,7 +157,7 @@ function dotenv_profile_list {
 
 function dotenv_profile_revert {
 	# We start by reverting any already managed file
-	dotenv_manage_revert
+	dotenv_managed_revert
 	if [ -e "$DOTENV_ACTIVE" ]; then
 		unlink "$DOTENV_ACTIVE"
 	fi
@@ -227,7 +227,7 @@ function dotenv_profile_apply {
 		# will be set to READ-ONLY, as they are generated from the config 
 		# file.
 		if [ "$EXT" = "tmpl" ]; then
-			if [ "$(dotenv_file_fragments "$FILE")" = "" ]; then
+			if [ "$(dotenv_file_fragments_list "$FILE")" = "" ]; then
 				local TEMP=$(mktemp)
 				dotenv_file_assemble "$FILE" > "$TEMP"
 				dotenv_tmpl_apply "$TEMP" "$DOTENV_PROFILES/$1/config.dotenv.sh" > "$FILE_MANAGED"
@@ -239,7 +239,7 @@ function dotenv_profile_apply {
 			fi
 			ln -sfr "$FILE_MANAGED" "$TARGET"
 		else
-			if [ "$(dotenv_file_fragments "$FILE")" = "" ]; then
+			if [ "$(dotenv_file_fragments_list "$FILE")" = "" ]; then
 				ln -sfr "$FILE" "$FILE_MANAGED"
 			else
 				dotenv_file_assemble "$FILE" > "$FILE_MANAGED"
@@ -318,7 +318,7 @@ function dotenv_backup_restore {
 #
 # -----------------------------------------------------------------------------
 
-function dotenv_manage_list {
+function dotenv_managed_list {
 ## Lists the files currently managed by dotenv
 	local FILE
 	if [ -e "$DOTENV_MANAGED" ]; then
@@ -326,7 +326,7 @@ function dotenv_manage_list {
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
 			local HOME_NAME=~/.$FILE_NAME
 			local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
-			local FILE_FRAGMENTS=$(dotenv_file_fragments "$FILE_ACTIVE")
+			local FILE_FRAGMENTS=$(dotenv_file_fragments_list "$FILE_ACTIVE")
 			echo ~/.${FILE#$DOTENV_MANAGED/}→~/${FILE#$DOTENV_USER_HOME/}→$(readlink ~/${FILE#$DOTENV_USER_HOME/})
 		done
 	fi
@@ -334,7 +334,7 @@ function dotenv_manage_list {
 
 
 # NOTE: This function is complex and critical, it must be edited with care.
-function dotenv_manage_add {
+function dotenv_managed_add {
 ## Adds the given FILES as managed files. This requires an active profile.
 	dotenv_assert_active
 	if [ ! -e "$DOTENV_MANAGED" ]; then
@@ -390,15 +390,15 @@ function dotenv_manage_add {
 				cat "$FILE_CANONICAL" > "$FILE_ACTIVE"
 				cp --attributes-only "$FILE" "$FILE_ACTIVE"
 				# We recreate the managed file (in case there are fragments/templates)
-				dotenv_manage_make "$FILE"
+				dotenv_managed_make "$FILE"
 				# We finally create a symlink between the managed path
-				dotenv_manage_apply "$FILE"
+				dotenv_managed_apply "$FILE"
 			fi
 		fi
 	done
 }
 
-function dotenv_manage_remove {
+function dotenv_managed_remove {
 	local FILE
 	for FILE in "$@" ; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
@@ -418,7 +418,7 @@ function dotenv_manage_remove {
 	done
 } 
 
-function dotenv_manage_make {
+function dotenv_managed_make {
 ## @param FILES* these paths are relative to home
 ## @output:stdout The path for each managed file corresponding to the given path
 ##
@@ -454,7 +454,7 @@ function dotenv_manage_make {
 	done
 }
 
-function dotenv_manage_apply {
+function dotenv_managed_apply {
 ## @param FILES relative to $DOTENV_USER_HOME that needs to be applied
 ##        from the $DOTENV_MANAGED directory.
 ##
@@ -479,17 +479,17 @@ function dotenv_manage_apply {
 				if [ ! -e "$FILE_BACKUP" ]; then
 					dotenv_fail "File already exists in the backup: $FILE_BACKUP"
 				fi
-				_dotenv_manage_apply "$FILE"
+				_dotenv_managed_apply "$FILE"
 			else
 				dotenv_backup_file "$FILE"
-				_dotenv_manage_apply "$FILE"
+				_dotenv_managed_apply "$FILE"
 			fi
 		fi
 	done
 }
 
 # NOTE: This is a HELPER function
-function _dotenv_manage_apply {
+function _dotenv_managed_apply {
 ## @helper
 ## @param FILE the $DOTENV_USER_HOME file that will be updated with the
 ##        corresponding $DOTENV_MANAGED file.
@@ -507,7 +507,7 @@ function _dotenv_manage_apply {
 		local PARENT=$(dirname "$FILE")
 		# We ensure that the parent exists
 		if [ ! -z "$PARENT" ]; then
-			_dotenv_manage_apply "$PARENT"
+			_dotenv_managed_apply "$PARENT"
 		fi
 		# Is the managed file a directory?
 		if [ -d "$FILE_MANAGED" ]; then
@@ -535,7 +535,7 @@ function _dotenv_manage_apply {
 	fi
 }
 
-function dotenv_manage_revert {
+function dotenv_managed_revert {
 ## Iterates on all the files in the $DOTENV_MANAGED directory. For each of this
 ## file, the corresponding target file installed in $DOTENV_USER_HOME will be removed.
 ## This requires the target file to point back to the same file as the managed
@@ -644,6 +644,67 @@ function dotenv_configuration_delta {
 # TEMPLATES HIGH-LEVEL
 #
 # -----------------------------------------------------------------------------
+
+function dotenv_template_apply {
+## Applies the given TEMPLATE to the given PROFILE=default.
+	#dotfile_template_apply ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien/config.dotenv.sh
+	#dotfile_template_assemble ~/.dotenv/templates/ffunction/hgrc.tmpl ~/.dotenv/profiles/sebastien
+	local TEMPLATE="$1"
+	local PROFILE="$2"
+	if [ -z "$PROFILE" ]; then
+		PROFILE="default"
+	fi
+	if [ -z "$TEMPLATE" ]; then
+		dotenv_error "dotenv_template_apply TEMPLATE PROFILE"
+	elif [ -z "$TEMPLATE" ]; then
+		dotenv_error "TEMPLATE is expected"
+	elif [ ! -e "$DOTENV_TEMPLATES/$TEMPLATE" ]; then
+		dotenv_error "TEMPLATE \"$TEMPLATE\" not found at $DOTENV_TEMPLATE/$TEMPLATE"
+		dotenv_info  "Available templates:"
+		for TMPL in $(dotenv-template); do
+			echo " - $TMPL"
+		done
+	else
+		# We create the profile if it does not exist
+		if [ ! -e "$DOTENV_PROFILES/$PROFILE" ]; then
+			mkdir -p "$DOTENV_PROFILES/$PROFILE"
+		fi
+		# We generate or update the configuration file
+		local CONFIG_DOTENV="$DOTENV_PROFILES/$PROFILE/config.dotenv.sh"
+		local CONFIG_DELTA=$(dotenv_configuration_delta "$DOTENV_TEMPLATES/$TEMPLATE" "$CONFIG_DOTENV")
+		if [ ! -z "$CONFIG_DELTA" ]; then
+			echo "$CONFIG_DELTA" >> "$CONFIG_DOTENV"
+			$EDITOR "$CONFIG_DOTENV"
+		fi
+		# Now we apply the files of the given template to the profile
+		# directory.
+		dotenv_info "$PROFILE ←― $TEMPLATE"
+		dotenv_template_link_files "$TEMPLATE" "$DOTENV_PROFILES/$PROFILE"
+	fi
+}
+
+function dotenv_template_merge {
+	local PARENT="$1"
+	local TEMPLATE="$2"
+	if [ -z "$PARENT" ] && [ -z "$TEMPLATE" ]; then
+		dotenv_error "dotenv_template_merge PARENT TEMPLATE"
+	elif [ -z "$PARENT" ]; then
+		dotenv_error "PARENT is expected"
+	elif [ -z "$TEMPLATE" ]; then
+		dotenv_error "TEMPLATE is expected"
+	elif [ ! -e "$DOTENV_TEMPLATES/$PARENT" ]; then
+		dotenv_error "PARENT \"$PARENT\" not found at $DOTENV_TEMPLATE/$PARENT"
+		dotenv_info  "Available templates:"
+		for FILE in $(dotenv-template); do
+			echo " - $FILE"
+		done
+	else
+		if [ ! -e "$DOTENV_TEMPLATES/$TEMPLATE" ]; then
+			mkdir "$DOTENV_TEMPLATES/$TEMPLATE"
+		fi
+		dotenv_template_link_files "$PARENT" "$DOTENV_TEMPLATES/$TEMPLATE"
+	fi
+}
 
 function dotenv_template_list {
 	local ALL
@@ -791,7 +852,7 @@ function dotenv_file_assemble {
 ## around it, making sure that any template file is expanded. The result
 ## is output to stdout.
 	local FRAGMENT
-	for FRAGMENT in $(dotenv_file_fragments "$1"); do
+	for FRAGMENT in $(dotenv_file_fragments_list "$1"); do
 		case "$FRAGMENT" in
 			*.tmpl|*.tmpl.pre|*.tmpl.pre.*|*.tmpl.post|*.tmpl.post.*)
 				dotenv_tmpl_apply "$FRAGMENT"
