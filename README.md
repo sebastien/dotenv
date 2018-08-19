@@ -177,7 +177,29 @@ Here's a table that illustrates how the dotfiles are built:
 | **`hgrc.post`** | *`hgrc.post`* *symlink* | `hgrc.post` *read-only*    | ↴
 |  *∅*            | `hgrc.post.1`         | `hgrc.post.1` *read-only*  | *`~/.hgrc`* *read-only symlink*
 
-## Examples
+
+## How-to
+
+## Create a dotenv profile
+
+```
+$ dotenv personal
+~/.dotenv/profile/personal
+```
+
+## Add a file to your dotenv profile
+
+```
+$ dotenv -a ~/.bashrc
+~/.bashrc → ~/.dotenv/profile/personal/bashrc
+```
+
+```
+$ dotenv -l
+~/.bashrc → ~/.dotenv/profile/personal/bashrc
+```
+
+## Use cases
 
 ### Manage my configuration files on one machine
 
@@ -195,7 +217,7 @@ Here's a table that illustrates how the dotfiles are built:
    be located at `~/.dotenv/profile/active`. Any file overridden by
    the profile will be backed up in `~/.dotenv/backup`.
 
-- `dotenv --create PROFILE?` ― creates the profile with the given name,
+- `dotenv PROFILE?` ― creates the profile with the given name,
    using "`default`" in case `PROFILE` is not specified.
 
 - `dotenv -p|--profiles` ― lists the available profiles, where active
@@ -209,8 +231,8 @@ Here's a table that illustrates how the dotfiles are built:
 - `dotenv -a|--add FILE…` ― adds the given dotfiles to the active profile, 
    saving a backup of the original file.
 
-- `dotenv -r|--remove FILE…` ― removes the given managed files and restores the files
-  in the state they were before dotenv was first run.
+- `dotenv -r|--revert FILE…` ― restores the given FILES (in your `$HOME`) to
+   their original value.
 
 - `dotenv -u|--update` ― updates and rebuilds the managed files, making sure
   all the files are up to date.

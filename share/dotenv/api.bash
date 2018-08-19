@@ -64,12 +64,22 @@ function dotenv_output {
 	exit 0
 }
 
-function dotenv_assert_active {
+function dotenv_assert_active_profile {
 ## Asserts that there is an active profile
 	if [ ! -e "$DOTENV_ACTIVE" ]; then
 		dotenv_fail "No active profile"
 	fi
 }
+
+function dotenv_assert_file_is_dotfile {
+## Asserts that the given file is a dotfile
+	if [ "$(dotenv_file_is_dotfile "$FILE")" != "OK" ]; then
+		# We fail if we don't have a dotfile
+		dotenv_fail "Expected a dotfile ($DOTENV_USER_HOME/.*), got: $FILE"
+	fi
+}
+
+
 
 # -----------------------------------------------------------------------------
 #
@@ -157,7 +167,7 @@ function dotenv_profile_list {
 
 function dotenv_profile_revert {
 	# We start by reverting any already managed file
-	dotenv_managed_revert
+	dotenv_managed_revert "$(find "$DOTENV_MANAGED" -name "*" -not -type d)"
 	if [ -e "$DOTENV_ACTIVE" ]; then
 		unlink "$DOTENV_ACTIVE"
 	fi
@@ -232,9 +242,11 @@ function dotenv_profile_apply {
 				dotenv_file_assemble "$FILE" > "$TEMP"
 				dotenv_tmpl_apply "$TEMP" "$DOTENV_PROFILES/$1/config.dotenv.sh" > "$FILE_MANAGED"
 				unlink "$TEMP"
+				# TODO: Copy/apply file attributes
 				chmod -w "$FILE_MANAGED"
 			else
 				dotenv_tmpl_apply "$FILE" "$DOTENV_PROFILES/$1/config.dotenv.sh" > "$FILE_MANAGED"
+				# TODO: Copy/apply file attributes
 				chmod -w "$FILE_MANAGED"
 			fi
 			ln -sfr "$FILE_MANAGED" "$TARGET"
@@ -245,6 +257,7 @@ function dotenv_profile_apply {
 				dotenv_file_assemble "$FILE" > "$FILE_MANAGED"
 				# The output file is going to be readonly because it's 
 				# assembled.
+				# TODO: Copy/apply file attributes
 				chmod -w "$FILE_MANAGED"
 			fi
 		fi
@@ -261,6 +274,7 @@ function dotenv_backup_file {
 ## Backs up the given file by moving them to `$DOTENV_BACKUP`.
 	local FILE
 	for FILE in "$@"; do
+		dotenv_assert_file_is_dotfile "$FILE"
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local PARENT_NAME=$(dirname "$FILE_NAME")
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
@@ -274,7 +288,9 @@ function dotenv_backup_file {
 			# We create the parent directory in backup and make sure that
 			# we preserve the attributes
 			mkdir -p "$FILE_BACKUP_PARENT"
+			echo "A0"
 			cp -a "$(dirname "$FILE")" "$FILE_BACKUP_PARENT"
+			echo "A1"
 		fi
 		# And now we can backup the file
 		mv "$FILE" "$FILE_BACKUP"
@@ -324,10 +340,16 @@ function dotenv_managed_list {
 	if [ -e "$DOTENV_MANAGED" ]; then
 		for FILE in $(find $DOTENV_MANAGED -name "*" -not -type d ); do
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
-			local HOME_NAME=~/.$FILE_NAME
-			local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
-			local FILE_FRAGMENTS=$(dotenv_file_fragments_list "$FILE_ACTIVE")
-			echo ~/.${FILE#$DOTENV_MANAGED/}→~/${FILE#$DOTENV_USER_HOME/}→$(readlink ~/${FILE#$DOTENV_USER_HOME/})
+			local ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
+			local EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
+			local INSTALLED="~/.$FILE_NAME"
+			if [ "$ACTUAL_TARGET" != "$EXPECTED_TARGET" ]; then
+				INSTALLED=""
+			fi
+			local MANAGED=$DOTENV_MANAGED/$FILE_NAME
+			local FRAGMENTS=$(dotenv_file_fragments_list "$DOTENV_ACTIVE/$FILE_NAME")
+			# TODO: We should output the paths relative to ~
+			echo $INSTALLED→$MANAGED→$FRAGMENTS
 		done
 	fi
 }
@@ -335,13 +357,16 @@ function dotenv_managed_list {
 
 # NOTE: This function is complex and critical, it must be edited with care.
 function dotenv_managed_add {
+## @param FILES the files to be managed
 ## Adds the given FILES as managed files. This requires an active profile.
-	dotenv_assert_active
+	dotenv_assert_active_profile
 	if [ ! -e "$DOTENV_MANAGED" ]; then
 		mkdir -p "$DOTENV_MANAGED"
 	fi
 	local FILE
 	for FILE in "$@"; do
+		# We ensure the file is a dotfile
+		dotenv_assert_file_is_dotfile "$FILE"
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
@@ -355,21 +380,18 @@ function dotenv_managed_add {
 			if [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
 				dotenv_error "File is already managed : $FILE ← $FILE_MANAGED"
 			else
-				dotenv_error "File conflicts with managed file: $FILE_MANAGED"
-				dotenv_action "Use managed version: dotenv-manage -o $FILE" 
+				dotenv_error "File conflicts with managed file: $FILE_MANAGED $(readlink $FILE)"
 			fi
 		# Is there a file in the active profile?
 		elif [ -e "$FILE_ACTIVE" ]; then
 			# The file is not managed yet (which means something failed before)
 			# so we re-apply the rules to create the managed file (if any)
 			dotenv_info "File already exists in active profile: $FILE → $FILE_ACTIVE"
-			dotenv_action "Use dotenv-manage -o $FILE to backup $FILE and deploy the managed version" 
 		# Is there any fragment in the active profile, but not the file itself?
 		elif [ "$FILE_ACTIVE_FRAGMENTS" != "" ]; then
 			# It's the same as above, but with a file that only has fragments
 			# ie `NAME.pre` but not `NAME`.
-			dotenv_info "File already exists in active profile: $FILE → $FILE_ACTIVE"
-			dotenv_action "Use dotenv-manage -o $FILE to backup $FILE and deploy the managed version" 
+			dotenv_info "File already exists with fragments in active profile: $FILE → $FILE_ACTIVE_FRAGMENTS"
 		# Is there a file already in the backup?
 		elif [ -e "$FILE_BACKUP" ]; then
 			# If so, we need user intervention to do something with the backup
@@ -387,12 +409,15 @@ function dotenv_managed_add {
 			else
 				# We create a copy of the canonical file. "cp -a" might
 				# actually be enough.
+				echo "B0"
 				cat "$FILE_CANONICAL" > "$FILE_ACTIVE"
 				cp --attributes-only "$FILE" "$FILE_ACTIVE"
+				echo "B1"
 				# We recreate the managed file (in case there are fragments/templates)
 				dotenv_managed_make "$FILE"
-				# We finally create a symlink between the managed path
-				dotenv_managed_apply "$FILE"
+				# We finally create a symlink between the managed path and the HOME.
+				# This will take care of backing up the original file.
+				dotenv_managed_install "$FILE"
 			fi
 		fi
 	done
@@ -400,23 +425,24 @@ function dotenv_managed_add {
 
 function dotenv_managed_remove {
 	local FILE
-	for FILE in "$@" ; do
+	local TMPFILE
+	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="${DOTENV_MANAGED}/$FILE_NAME"
-		local FILE_BACKUP="{DOTENV_BACKUP}/$FILE_NAME"
+		local FILE_BACKUP="${DOTENV_BACKUP}/$FILE_NAME"
 		if [ -e "$FILE_BACKUP" ]; then
 			# Do we have a backup for the file? That's the expected
 			# behaviour.
-			FILE="$FILE"
+			dotenv_managed_revert "$FILE_NAME"
 		elif [ -e "$FILE_MANAGED" ]; then
 			# We don't have backup, but we should have the managed
 			# file, which we can move back
-			FILE="$FILE"
+			dotenv_managed_revert "$FILE_NAME"
 		else
 			dotenv_error "No backup ($FILE_BACKUP) or managed file ($FILE_MANAGED) for: $FILE"
 		fi
 	done
-} 
+}
 
 function dotenv_managed_make {
 ## @param FILES* these paths are relative to home
@@ -424,72 +450,102 @@ function dotenv_managed_make {
 ##
 ## Looks for each of the given `FILE`s in the active profile, and links
 ## the file or assembles its fragments into `~/.dotenv/managed`, output.
-	dotenv_assert_active
+	dotenv_assert_active_profile
 	local FILE
 	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
+		local FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_ACTIVE")"
 		if [ -e "$FILE" ]; then
+			# The file already exists, so we resolve it to its canoncial reference
 			FILE=$(readlink -f "$FILE")
-		elif [ -z "$(dotenv_file_fragment_types)" ]; then
+		elif [ -z "$FILE_FRAGMENTS" ]; then
+			# There is on fragment, nor managed version, nor existisng file
 			dotenv_error "$FILE does not exist in active profile: $FILE_ACTIVE"
 			exit 1
 		else
-			echo dotenv_file_assemble "$FILE_ACTIVE_FRAGMENTS" "$FILE_MANAGED"
+			# There is no existing or managed, but fragments, so we create
+			# the managed version.
+			# TODO: Copy/apply file attributes
+			dotenv_file_assemble "$FILE_ACTIVE_FRAGMENTS" > "$FILE_MANAGED"
+		fi
+		# We make sure to remove the managed file, as we're going to rebuild
+		# it. It might be a symlink or a regular file.
+		if [ -e "$FILE_MANAGED" ]; then
+			chmod u+w "$FILE_MANAGED"
+			unlink "$FILE_MANAGED"
 		fi
 		# If there is only one regular file as a fragment, we symlink from
 		# the active profile to the managed.
-		if [ "$(dotenv_file_fragment_types "$FILE_ACTIVE")" == "f" ]; then
+		if [ "$FILE_FRAGMENTS" == "f" ]; then
 			ln -sfr "$FILE_ACTIVE" "$FILE_MANAGED"
 		# Otherwise we assembe it
 		else
-			if [ -e "$FILE_MANAGED" ]; then
-				chmod u+w "$FILE_MANAGED"
-				unlink "$FILE_MANAGED"
-			fi
+			# TODO: Copy/apply file attributes
 			dotenv_file_assemble "$FILE_ACTIVE" > "$FILE_MANAGED"
 		fi
 		echo "$FILE_MANAGED"
 	done
 }
 
-function dotenv_managed_apply {
+function dotenv_managed_installed {
+## @param FILE the $DOTENV_USER_HOME 
+	local FILE="$1"
+	local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+	if [ "$(dotenv_file_is_dotfile "$FILE")" != "OK" ]; then
+		dotenv_error "File is not a dotfile: $FILE"
+	else
+		# TODO: Implement this
+		echo "TODO: INSTALLED $FILE"
+	fi
+
+}
+
+function dotenv_managed_install {
 ## @param FILES relative to $DOTENV_USER_HOME that needs to be applied
 ##        from the $DOTENV_MANAGED directory.
 ##
 ## Takes a file readily available in $DOTENV_MANAGED and installs it
 ## in $DOTENV_USER_HOME. This requires that there is no existing backup
 ## for the given file.
-	dotenv_assert_active
+	dotenv_assert_active_profile
 	local FILE
 	for FILE in "$@"; do
+		dotenv_assert_file_is_dotfile "$FILE"
+		# TODO: Check that FILE_NAME does start with ~/.
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
-		if [ "$FILE" != "$DOTENV_USER_HOME/.$FILE_NAME" ]; then
-			# NOTE: We might want to loosen that criteria
-			dotenv_fail "File is not a dotfile: $FILE"
+		if [ ! -e "$FILE_MANAGED" ]; then
+			dotenv_fail "Managed file does not exist: $FILE_MANAGED"
+		fi
+		if [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
+			# If the file is already managed, we simply install it
+			if [ -e "$FILE" ]; then
+				chmod u+w "$FILE" ; rm "$FILE"
+			fi
+			_dotenv_managed_install "$FILE"
 		else
-			if [ ! -e "$FILE_MANAGED" ]; then
-				dotenv_fail "Managed file does not exist: $FILE_MANAGED"
+			# Otherwise we try to backup the file
+			# TODO: We should check if both files are the same or not
+			if [ -e "$FILE_BACKUP" ]; then
+				dotenv_fail "File already exists in the backup: $FILE_BACKUP"
 			fi
-			if [ "$(readlink "$FILE")" != "$FILE_MANAGED" ]; then
-				if [ ! -e "$FILE_BACKUP" ]; then
-					dotenv_fail "File already exists in the backup: $FILE_BACKUP"
-				fi
-				_dotenv_managed_apply "$FILE"
-			else
-				dotenv_backup_file "$FILE"
-				_dotenv_managed_apply "$FILE"
+			# We backup the original dotfile
+			dotenv_info "Backing up existing file $FILE to $FILE_BACKUP"
+			dotenv_backup_file "$FILE"
+			if [ -e "$FILE" ]; then
+				chmod u+w "$FILE" ; rm "$FILE"
 			fi
+			_dotenv_managed_install "$FILE"
 		fi
 	done
 }
 
 # NOTE: This is a HELPER function
-function _dotenv_managed_apply {
+function _dotenv_managed_install {
 ## @helper
 ## @param FILE the $DOTENV_USER_HOME file that will be updated with the
 ##        corresponding $DOTENV_MANAGED file.
@@ -507,7 +563,7 @@ function _dotenv_managed_apply {
 		local PARENT=$(dirname "$FILE")
 		# We ensure that the parent exists
 		if [ ! -z "$PARENT" ]; then
-			_dotenv_managed_apply "$PARENT"
+			_dotenv_managed_install "$PARENT"
 		fi
 		# Is the managed file a directory?
 		if [ -d "$FILE_MANAGED" ]; then
@@ -515,13 +571,15 @@ function _dotenv_managed_apply {
 				# NOTE: We don't need -p here as we've recursed on the parent
 				# already
 				mkdir "$FILE"
+				echo "C0"
 				cp --attributes-only "$FILE_MANAGED" "$FILE"
+				echo "C1"
 			fi
 		else
 			# Here the managed version is a file.
 			if [ ! -e "$FILE" ]; then
 				# If there's no target file, we link it
-				ln -sr "$FILE_MANAGED" "$FILE"
+				ln -sfr "$FILE_MANAGED" "$FILE"
 			elif [ "$(readlink "$FILE")" != "$FILE_MANAGED" ]; then
 				# If there's a file and it's not a link to our
 				# managed file, we back it up.
@@ -529,24 +587,36 @@ function _dotenv_managed_apply {
 				# TODO: Improve this with suffixes if backups already
 				# present.
 				mv "$FILE" "$FILE".bak
-				ln -sr "$FILE_MANAGED" "$FILE"
+				ln -sfr "$FILE_MANAGED" "$FILE"
 			fi
 		fi
 	fi
 }
 
 function dotenv_managed_revert {
-## Iterates on all the files in the $DOTENV_MANAGED directory. For each of this
-## file, the corresponding target file installed in $DOTENV_USER_HOME will be removed.
+## Iterates on the given `FILE`s or all the files in the $DOTENV_MANAGED directory.
+## For each of these `FILE:
+##
+## - The installed version in `~/.FILE` will be restored with a backup (if any)
+## - The managed file will be unlinked (but will remain in the profile)
+##
+## Note that each file is going to be considered to "$DOTENV_MANAGED", so you
+## can't directly given dotfiles.
+##
 ## This requires the target file to point back to the same file as the managed
 ## file. If not, this means the file was changed and the process will fail.
 	local FILE
+	local FILES="$*"
 	if [ -d "$DOTENV_MANAGED" ]; then
-		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d); do
+		for FILE in $FILES; do
+			# TARGET is the dotfile path in the user's home
 			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_MANAGED/}
-			if [ -e "$TARGET" ]; then
+			local FILE_MANAGED=$DOTENV_MANAGED/${FILE#$DOTENV_MANAGED/}
+			if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+				# The target already exists, so we check that its origin
+				# is what we expect (ie, it is managed)
 				ACTUAL_ORIGIN=$(readlink -f "$TARGET")
-				EXPECTED_ORIGIN=$(readlink -f "$FILE")
+				EXPECTED_ORIGIN=$(readlink -f "$FILE_MANAGED")
 				if [ "$ACTUAL_ORIGIN" != "$EXPECTED_ORIGIN" ]; then
 					# TODO: Improve error message
 					dotenv_error "Managed file \"$TARGET\" should point to \"$EXPECTED_ORIGIN\""
@@ -554,23 +624,16 @@ function dotenv_managed_revert {
 					# NOTE: We don't unlink the file there.
 				else
 					unlink "$TARGET"
-					unlink "$FILE"
 				fi
 				# We clean the target directory.
-				if [ "$(dirname "$TARGET")" != "" ]; then
+				if [ "$(dirname "$TARGET")" != "$DOTENV_USER_HOME" ]; then
 					dotenv_dir_clean "$(dirname "$TARGET")"
 				fi
-			else
-				unlink "$FILE"
 			fi
 		done
 		# TODO: Remove empty directories on the target side
 		# We remove empty directories
 		dotenv_dir_clean "$DOTENV_MANAGED"
-		if [ -e "$DOTENV_MANAGED" ] ; then
-			dotenv_error "Could not fully remove managed files, some files were altered"
-			exit 1
-		fi
 	fi
 }
 
@@ -792,6 +855,21 @@ function dotenv_dir_clean {
 	local SUFFIX=${DIRPATH#$DOTENV_USER_HOME}
 	if [ -d "$DIRPATH" ] && [ "$SUFFIX" != "" ] && [ "$SUFFIX" != "/" ]; then
 		find "$DIRPATH" -depth -type d -empty -exec rmdir '{}' ';'
+	fi
+}
+
+function dotenv_file_is_dotfile {
+## @param FILE
+## Echoes "OK" if the given file is a dotfile
+	dotenv_file_has_prefix "$1" "$DOTENV_USER_HOME/."
+}
+
+function dotenv_file_has_prefix {
+## @param FILE
+## @param PREFIX
+## Echoes "OK" if the given FILE has the given PREFIX
+	if [ "$1" == "$2${1#$2}" ]; then
+		echo -n "OK"
 	fi
 }
 

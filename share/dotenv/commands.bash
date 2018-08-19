@@ -30,12 +30,18 @@ function command-dotenv {
 		case "$1" in
 		-h|--help)
 			echo "Usage: dotenv [OPTION] PROFILE|FILE…"
-			echo "Lists, adds and remove files managed by dotenv"
+			echo "Manages multiple dotfile configurations"
 			echo 
-			echo "                       Manages the given files with dotenv"
-			echo " -l, --list            Lists the files managed by the current PROFILE "
-			echo " -u, --update          TODO"
-			echo " -r, --remove          TODO"
+			echo " PROFILE               Activates/creates the given profile"
+			echo " -p, --profiles        List available profiles"
+			echo " -c, --configure       Configure the active profile"
+			echo 
+			echo " FILE…"
+			echo " -a, --add             Adds the given files to the active profile"
+			echo " -u, --update          Updates all/given files based on the active profile"
+			echo " -r, --revert          Reverts all/given files that were previously managed"
+			echo " -e, --edit            Edits the given managed files(s)"
+
 			;;
 		# =====================================================================
 		# PROFILES
@@ -60,13 +66,14 @@ function command-dotenv {
 			dotenv_managed_add "$*"
 			exit 0
 			;;
-		-r|--remove)
+		-r|--revert)
 			shift
 			dotenv_managed_remove "$*"
 			exit 0
 			;;
 		-u|--update)
-			dotenv_fail "Not implemented yet"
+			shift
+			dotenv_managed_update "$*"
 			exit 0
 			;;
 		-l|--list)
