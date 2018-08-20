@@ -79,7 +79,13 @@ function dotenv_assert_file_is_dotfile {
 	fi
 }
 
-
+function dotenv_assert_file_is_managed {
+## Asserts that the given file is a dotfile
+	if [ "$(dotenv_file_has_prefix "$FILE" "$DOTENV_MANAGED/")" != "OK" ]; then
+		# We fail if we don't have a dotfile
+		dotenv_fail "Expected a dotenv managed path ($DOTENV_MANAGED/*), got: $FILE"
+	fi
+}
 
 # -----------------------------------------------------------------------------
 #
@@ -288,9 +294,7 @@ function dotenv_backup_file {
 			# We create the parent directory in backup and make sure that
 			# we preserve the attributes
 			mkdir -p "$FILE_BACKUP_PARENT"
-			echo "A0"
 			cp -a "$(dirname "$FILE")" "$FILE_BACKUP_PARENT"
-			echo "A1"
 		fi
 		# And now we can backup the file
 		mv "$FILE" "$FILE_BACKUP"
@@ -409,10 +413,8 @@ function dotenv_managed_add {
 			else
 				# We create a copy of the canonical file. "cp -a" might
 				# actually be enough.
-				echo "B0"
 				cat "$FILE_CANONICAL" > "$FILE_ACTIVE"
 				cp --attributes-only "$FILE" "$FILE_ACTIVE"
-				echo "B1"
 				# We recreate the managed file (in case there are fragments/templates)
 				dotenv_managed_make "$FILE"
 				# We finally create a symlink between the managed path and the HOME.
@@ -423,6 +425,7 @@ function dotenv_managed_add {
 	done
 }
 
+# TODO: This is actually revert in the command lie API
 function dotenv_managed_remove {
 	local FILE
 	local TMPFILE
@@ -433,11 +436,11 @@ function dotenv_managed_remove {
 		if [ -e "$FILE_BACKUP" ]; then
 			# Do we have a backup for the file? That's the expected
 			# behaviour.
-			dotenv_managed_revert "$FILE_NAME"
+			dotenv_managed_revert "$FILE_MANAGED"
 		elif [ -e "$FILE_MANAGED" ]; then
 			# We don't have backup, but we should have the managed
 			# file, which we can move back
-			dotenv_managed_revert "$FILE_NAME"
+			dotenv_managed_revert "$FILE_MANAGED"
 		else
 			dotenv_error "No backup ($FILE_BACKUP) or managed file ($FILE_MANAGED) for: $FILE"
 		fi
@@ -521,8 +524,12 @@ function dotenv_managed_install {
 		if [ ! -e "$FILE_MANAGED" ]; then
 			dotenv_fail "Managed file does not exist: $FILE_MANAGED"
 		fi
-		if [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
-			# If the file is already managed, we simply install it
+		if [ ! -e "$FILE" ]; then
+			# If the file does not exist, we simply install it
+			_dotenv_managed_install "$FILE"
+		elif [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
+			# If the file is already managed, we re-install it, removing
+			# the old one.
 			if [ -e "$FILE" ]; then
 				chmod u+w "$FILE" ; rm "$FILE"
 			fi
@@ -571,9 +578,7 @@ function _dotenv_managed_install {
 				# NOTE: We don't need -p here as we've recursed on the parent
 				# already
 				mkdir "$FILE"
-				echo "C0"
 				cp --attributes-only "$FILE_MANAGED" "$FILE"
-				echo "C1"
 			fi
 		else
 			# Here the managed version is a file.
@@ -609,9 +614,12 @@ function dotenv_managed_revert {
 	local FILES="$*"
 	if [ -d "$DOTENV_MANAGED" ]; then
 		for FILE in $FILES; do
+			dotenv_assert_file_is_managed
 			# TARGET is the dotfile path in the user's home
-			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_MANAGED/}
-			local FILE_MANAGED=$DOTENV_MANAGED/${FILE#$DOTENV_MANAGED/}
+			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
+			local TARGET=$DOTENV_USER_HOME/.$FILE_NAME
+			local FILE_MANAGED=$DOTENV_MANAGED/$FILE_NAME
+			local FILE_BACKUP=$DOTENV_MANAGED/$FILE_NAME
 			if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
 				# The target already exists, so we check that its origin
 				# is what we expect (ie, it is managed)
@@ -624,6 +632,11 @@ function dotenv_managed_revert {
 					# NOTE: We don't unlink the file there.
 				else
 					unlink "$TARGET"
+					if [ -e "$FILE_BACKUP" ] || [ -L "$FILE_BACKUP" ]; then
+						dotenv_info "Restoring backed up version of: $TARGET"
+						mv "$FILE_BACKUP" "$TARGET"
+						dotenv_dir_clean "$(dirname "$FILE_BACKUP")"
+					fi
 				fi
 				# We clean the target directory.
 				if [ "$(dirname "$TARGET")" != "$DOTENV_USER_HOME" ]; then

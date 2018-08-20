@@ -73,7 +73,7 @@ function command-dotenv {
 			;;
 		-u|--update)
 			shift
-			dotenv_managed_update "$*"
+			dotenv_managed_install "$*"
 			exit 0
 			;;
 		-l|--list)
