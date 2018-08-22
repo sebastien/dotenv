@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
+BASE=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "$BASE/../share/dotenv/commands.bash"
 COMMAND=$(basename $0)
 case $COMMAND in

@@ -87,8 +87,7 @@ function command-dotenv {
 				dotenv_info "No active profile, run dotenv with one of:"
 				dotenv_list "$(dotenv_profile_list)"
 			else
-				dotenv_info "No managed files in profile $(dotenv_profile_active)"
-				dotenv_info "Add files with: \`dotenv-manage FILES…\`"
+				dotenv_info "No managed files in profile $(dotenv_profile_active), add files with: dotenv -a FILES…"
 				exit 0
 			fi
 			;;
@@ -97,20 +96,19 @@ function command-dotenv {
 			dotenv_fail "Invalid option '$1'. Use --help to see the valid options" >&2
 			;;
 		*)
-			if [ -e "$DOTENV_PROFILES/$1" ]; then
-				dotenv_info "Applying profile $1"
-				dotenv_profile_apply "$1"
-				exit 0
-			else
-				dotenv_error "Profile does not exist: $1. Use one of:"
-				dotenv_list "$(dotenv_profile_list)"
-				exit 1
+			if [ ! -e "$DOTENV_PROFILES/$1" ]; then
+				dotenv_info "Creating profile $1"
+				mkdir -p "$DOTENV_PROFILES/$1"
 			fi
+			dotenv_profile_apply "$1"
+			exit 0
 			;;
 		esac
 		shift
 	done
-	# TODO: Determine what the default should be
+	# TODO: Default should:
+	# 1) Show the active profile
+	# 2) Show the managed files
 }
 
 # EOF - vim: ts=4 sw=4 noet 

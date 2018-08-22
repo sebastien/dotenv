@@ -173,19 +173,32 @@ function dotenv_profile_list {
 
 function dotenv_profile_revert {
 	# We start by reverting any already managed file
-	dotenv_managed_revert "$(find "$DOTENV_MANAGED" -name "*" -not -type d)"
+	local FILE
+	if [ -e "$DOTENV_MANAGED" ]; then
+		local FILES_MANAGED="$(find "$DOTENV_MANAGED" -name "*" -not -type d)"
+		# We revert any managed file
+		dotenv_managed_revert "$FILES_MANAGED"
+		# Now we can safely remove all the managed files
+		for FILE in $FILES_MANAGED; do
+			unlink "$FILE"
+		done
+		# And clean up the directory
+		dotenv_dir_clean "$DOTENV_MANAGED"
+		# Which should now be clean.
+		if [ -d "$DOTENV_MANAGED" ]; then
+			dotenv_error "Managed directory still present after revert: $DOTENV_MANAGED"
+			exit 1
+		fi
+	fi
+	# We've reverted the active profile, so we can remove the link.
 	if [ -e "$DOTENV_ACTIVE" ]; then
 		unlink "$DOTENV_ACTIVE"
-	fi
-	if [ -d "$DOTENV_MANAGED" ]; then
-		dotenv_error "managed directory still present after revert: $DOTENV_MANAGED"
-		exit 1
 	fi
 	# We restore backed up files so that the profile is in the 
 	# same state it was before dotenv was run.
 	dotenv_backup_restore
 	if [ -d "$DOTENV_BACKUP" ]; then
-		dotenv_error "backup directory still present after restore: $DOTENV_BACKUP"
+		dotenv_error "Backup directory still present after restore: $DOTENV_BACKUP"
 		exit 1
 	fi
 }
@@ -277,7 +290,7 @@ function dotenv_profile_apply {
 
 function dotenv_backup_file {
 ## @param FILE* the files to backup
-## Backs up the given file by moving them to `$DOTENV_BACKUP`.
+## Backs up the given file by **moving** them to `$DOTENV_BACKUP`.
 	local FILE
 	for FILE in "$@"; do
 		dotenv_assert_file_is_dotfile "$FILE"
@@ -294,7 +307,9 @@ function dotenv_backup_file {
 			# We create the parent directory in backup and make sure that
 			# we preserve the attributes
 			mkdir -p "$FILE_BACKUP_PARENT"
-			cp -a "$(dirname "$FILE")" "$FILE_BACKUP_PARENT"
+			if [ "$PARENT_NAME" != "." ] && [ ! -d "$FILE_BACKUP_PARENT" ]; then
+				cp --attributes-only "$(dirname "$FILE")" "$FILE_BACKUP_PARENT"
+			fi
 		fi
 		# And now we can backup the file
 		mv "$FILE" "$FILE_BACKUP"
@@ -342,7 +357,7 @@ function dotenv_managed_list {
 ## Lists the files currently managed by dotenv
 	local FILE
 	if [ -e "$DOTENV_MANAGED" ]; then
-		for FILE in $(find $DOTENV_MANAGED -name "*" -not -type d ); do
+		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
 			local ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
 			local EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
@@ -354,6 +369,35 @@ function dotenv_managed_list {
 			local FRAGMENTS=$(dotenv_file_fragments_list "$DOTENV_ACTIVE/$FILE_NAME")
 			# TODO: We should output the paths relative to ~
 			echo $INSTALLED→$MANAGED→$FRAGMENTS
+		done
+	fi
+}
+
+function dotenv_managed_list_installable {
+	local FILE
+	if [ -e "$DOTENV_MANAGED" ]; then
+		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
+			local FILE_NAME="${FILE#$DOTENV_MANAGED/}"
+			echo "$DOTENV_USER_HOME/.$FILE_NAME"
+		done
+	fi
+}
+
+function dotenv_managed_list_installed {
+## Lists the managed files (from `$DOTENV_MANAGED/*`) that are actually
+## installedin in `$DOTENV_USER_HOME/.*`.
+	local FILE
+	local FILE_NAME
+	local ACTUAL_TARGET
+	local EXPECTED_TARGET
+	if [ -e "$DOTENV_MANAGED" ]; then
+		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
+			FILE_NAME="${FILE#$DOTENV_MANAGED/}"
+			ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
+			EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
+			if [ "$ACTUAL_TARGET" == "$EXPECTED_TARGET" ]; then
+				echo "$DOTENV_USER_HOME/.$FILE_NAME"
+			fi
 		done
 	fi
 }
@@ -425,12 +469,17 @@ function dotenv_managed_add {
 	done
 }
 
-# TODO: This is actually revert in the command lie API
+# TODO: This is actually revert in the command line API
 function dotenv_managed_remove {
 	local FILE
-	local TMPFILE
-	for FILE in "$@"; do
-		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+	local FILE_NAME
+	local FILES="$*"
+	# If there's no argument, then we revert all the managed files
+	if [ -z "$FILES" ]; then
+		FILES=$(dotenv_managed_list_installed)
+	fi
+	for FILE in $FILES; do
+		FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="${DOTENV_MANAGED}/$FILE_NAME"
 		local FILE_BACKUP="${DOTENV_BACKUP}/$FILE_NAME"
 		if [ -e "$FILE_BACKUP" ]; then
@@ -514,7 +563,11 @@ function dotenv_managed_install {
 ## for the given file.
 	dotenv_assert_active_profile
 	local FILE
-	for FILE in "$@"; do
+	local FILES=$*
+	if [ -z "$FILES" ]; then
+		FILES=$(dotenv_managed_list_installable)
+	fi
+	for FILE in $FILES; do
 		dotenv_assert_file_is_dotfile "$FILE"
 		# TODO: Check that FILE_NAME does start with ~/.
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
@@ -612,6 +665,7 @@ function dotenv_managed_revert {
 ## file. If not, this means the file was changed and the process will fail.
 	local FILE
 	local FILES="$*"
+
 	if [ -d "$DOTENV_MANAGED" ]; then
 		for FILE in $FILES; do
 			dotenv_assert_file_is_managed
@@ -619,7 +673,7 @@ function dotenv_managed_revert {
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
 			local TARGET=$DOTENV_USER_HOME/.$FILE_NAME
 			local FILE_MANAGED=$DOTENV_MANAGED/$FILE_NAME
-			local FILE_BACKUP=$DOTENV_MANAGED/$FILE_NAME
+			local FILE_BACKUP=$DOTENV_BACKUP/$FILE_NAME
 			if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
 				# The target already exists, so we check that its origin
 				# is what we expect (ie, it is managed)
@@ -631,6 +685,8 @@ function dotenv_managed_revert {
 					dotenv_error "but instead points to \"$ACTUAL_ORIGIN\""
 					# NOTE: We don't unlink the file there.
 				else
+					# This is where we effectively remove the installed
+					# file and restore the backup (if any).
 					unlink "$TARGET"
 					if [ -e "$FILE_BACKUP" ] || [ -L "$FILE_BACKUP" ]; then
 						dotenv_info "Restoring backed up version of: $TARGET"
