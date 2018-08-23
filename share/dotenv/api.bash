@@ -77,6 +77,7 @@ function dotenv_assert_active_profile {
 
 function dotenv_assert_file_is_dotfile {
 ## Asserts that the given file is a dotfile
+	local FILE="$1"
 	if [ "$(dotenv_file_is_dotfile "$FILE")" != "OK" ]; then
 		# We fail if we don't have a dotfile
 		dotenv_fail "Expected a dotfile ($DOTENV_USER_HOME/.*), got: $FILE"
@@ -85,6 +86,7 @@ function dotenv_assert_file_is_dotfile {
 
 function dotenv_assert_file_is_managed {
 ## Asserts that the given file is a dotfile
+	local FILE="$1"
 	if [ "$(dotenv_file_has_prefix "$FILE" "$DOTENV_MANAGED/")" != "OK" ]; then
 		# We fail if we don't have a dotfile
 		dotenv_fail "Expected a dotenv managed path ($DOTENV_MANAGED/*), got: $FILE"
@@ -124,18 +126,47 @@ function dotenv_profile_active {
 	fi
 }
 
-function dotenv_profile_manifest {
-## Lists the files defined in the given `profile`.
-## @param profile
-	local CONFIG_NAME=$(basename "$DOTENV_CONFIG")
+function dotenv_profile_manifest_raw {
+	local FILE
 	local PROFILE="$1"
+	local PROFILE_PATH
+	local TEMPLATE
+	# We normalize the profile name and path, to make sure
+	# we can resolve to an actual file/directory.
 	if [ -z "$PROFILE" ]; then
 		PROFILE=$(dotenv_profile_active)
 	fi
 	if [ -z "$PROFILE" ]; then
 		dotenv_fail "No profile selected"
+	elif [ "$(dirname "$PROFILE")" == "." ]; then
+		if [ -e "$DOTENV_TEMPLATES/$PROFILE" ]; then
+			PROFILE_PATH="$DOTENV_TEMPLATES/$PROFILE"
+		elif [ -e "$DOTENV_PROFILES/$PROFILE" ]; then
+			PROFILE_PATH="$DOTENV_PROFILES/$PROFILE"
+		fi
 	fi
-	find -L "$DOTENV_PROFILES/$PROFILE" -name "*" -not -type d -not -name "$CONFIG_NAME" | sed 's/\.pre\..//g;s/\.post\..//g;s|.pre||g;s|.post||g;s|.tmpl||g'  | sort | uniq
+	if [ -z "$PROFILE_PATH" ]; then
+		dotenv_fail "Profile does not exist in $DOTENV_PROFILES or $DOTENV_TEMPLATES: $PROFILE"
+	fi
+	# Now, if the profile has a template file, we recurse
+	local TEMPLATE_FILE="$PROFILE_PATH/dotenv.templates.lst"
+	if [ -e "$TEMPLATE_FILE" ]; then
+		for TEMPLATE in $(cat "$TEMPLATE_FILE"); do
+			dotenv_profile_manifest_raw "$TEMPLATE"
+		done
+	fi
+	# And now we output the files by profile
+	for FILE in $(find -L "$PROFILE_PATH" -name "*" -not -type d -not -name "$CONFIG_NAME"); do
+		local FILE_NAME=${FILE#$PROFILE_PATH/}
+		local FILE_KEY=$(echo "$FILE_NAME" | sed 's/\.pre\..//g;s/\.post\..//g;s|.pre||g;s|.post||g;s|.tmpl||g')
+		echo "$FILE_KEY|$FILE"
+	done
+}
+
+function dotenv_profile_manifest {
+## Lists the files defined in the given `profile`.
+## @param profile
+	dotenv_profile_manifest_raw "$1" |  cut -d'|' -f1 | sort | uniq
 }
 
 function dotenv_profile_list {
@@ -300,19 +331,9 @@ function dotenv_managed_list {
 				INSTALLED=""
 			fi
 			local MANAGED=$DOTENV_MANAGED/$FILE_NAME
-			local FRAGMENTS=$(dotenv_file_fragment_list "$DOTENV_ACTIVE/$FILE_NAME")
+			local FRAGMENTS=$(dotenv_file_fragment_list "$INSTALLED")
 			# TODO: We should output the paths relative to ~
 			echo $INSTALLED→$MANAGED→$FRAGMENTS
-		done
-	fi
-}
-
-function dotenv_managed_list_installable {
-	local FILE
-	if [ -e "$DOTENV_MANAGED" ]; then
-		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
-			local FILE_NAME="${FILE#$DOTENV_MANAGED/}"
-			echo "$DOTENV_USER_HOME/.$FILE_NAME"
 		done
 	fi
 }
@@ -446,7 +467,7 @@ function dotenv_managed_make {
 		local FILE_TARGET="$DOTENV_USER_HOME/.$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
-		local FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_ACTIVE")"
+		local FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_TARGET")"
 		if [ -e "$FILE" ]; then
 			# The file already exists, so we resolve it to its canoncial reference
 			FILE=$(readlink -f "$FILE")
@@ -471,7 +492,7 @@ function dotenv_managed_make {
 		# Otherwise we assemble it
 		else
 			# TODO: Copy/apply file attributes
-			dotenv_file_assemble "$FILE_ACTIVE"  > "$FILE_MANAGED"
+			dotenv_file_assemble "$FILE_TARGET"  > "$FILE_MANAGED"
 		fi
 	done
 }
@@ -513,7 +534,7 @@ function dotenv_managed_install {
 	local FILE
 	local FILES=$*
 	if [ -z "$FILES" ]; then
-		FILES=$(dotenv_managed_list_installable)
+		FILES=$(dotenv_profile_manifest)
 	fi
 	for FILE in $FILES; do
 		dotenv_assert_file_is_dotfile "$FILE"
@@ -981,16 +1002,32 @@ function dotenv_file_post_list {
 }
 
 function dotenv_file_fragment_list {
+## @param FILE ― when FILE is a dotfile, it will look in the current profile's
+##        raw manifest and extract the list of file fragments through the
+##        templates.
 ## Lists the file fragments used to assemble the given file. This looks
 ## for  `*.pre.*` and `*.post.*` files and outputs them in order.
-	dotenv_file_pre_list  "$1"
-	if [ -e "$1" ]; then
-		echo "$1"
+	
+	local FILE="$1"
+	if [ "$(dotenv_file_has_prefix "$FILE" "$DOTENV_HOME")" != "OK" ] && [ "$(dotenv_file_is_dotfile "$FILE")" == "OK" ]; then
+		# If the given FILE is a *dotfile* then we look in the
+		# complete raw manifest and extract the list of actual templates
+		local FILE_NAME=${1#$DOTENV_USER_HOME/.}
+		local FILE_FRAGMENTS
+		FILE_FRAGMENTS=$(dotenv_profile_manifest_raw | grep "$FILE_NAME" | cut -d'|' -f2 | sed 's/\.pre\..//g;s/\.post\..//g;s|.pre||g;s|.post||g;s|.tmpl||g')
+		for FILE in $FILE_FRAGMENTS; do
+			dotenv_file_fragment_list "$FILE"
+		done
+	else
+		dotenv_file_pre_list  "$FILE"
+		if [ -e "$FILE" ]; then
+			echo "$FILE"
+		fi
+		if [ -e "$FILE.tmpl" ]; then
+			echo "$FILE.tmpl"
+		fi
+		dotenv_file_post_list "$FILE"
 	fi
-	if [ -e "$1.tmpl" ]; then
-		echo "$1.tmpl"
-	fi
-	dotenv_file_post_list "$1"
 }
 
 function dotenv_file_fragment_types {
