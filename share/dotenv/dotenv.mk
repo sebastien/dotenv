@@ -14,16 +14,17 @@
 # TODO: Re-generate when configuration changes
 
 # The paths to the dotenv files
-DOTENV_PATH     =$(HOME)/.dotenv
-DOTENV_ACTIVE   =$(DOTENV_PATH)/active
+DOTENV_HOME     =$(HOME)/.dotenv
+DOTENV_ACTIVE   =$(DOTENV_HOME)/active
 DOTENV_USER_HOME=$(HOME)
-DOTENV_MANAGED  =$(DOTENV_PATH)/managed
-DOTENV_INACTIVE =$(DOTENV)/inactive.lst
+DOTENV_MANAGED  =$(DOTENV_HOME)/managed
+DOTENV_INACTIVE =$(DOTENV_HOME)/inactive.lst
+DOTENV_CONFIG   =$(DOTENV_HOME)/config.sh
 
 # The list of ALL active profile dotfiles, including the .tmpl and pre and post
 PROFILE_ALL      =$(shell test -e $(DOTENV_ACTIVE) && find $(DOTENV_ACTIVE)/ -name "*" -not -type d)
 # The list of INACTIVE dotfiles, as listed in the inactive.lst file
-PROFILE_INACTIVE =$(patsubst %,$(DOTENV_ACTIVE)/%,$(filter-out \#%,$(shell test -e $(DOTENV_PATH)/inactive.lst && cat $(DOTENV_PATH)/inactive.lst)))
+PROFILE_INACTIVE =$(patsubst %,$(DOTENV_ACTIVE)/%,$(filter-out \#%,$(shell test -e $(DOTENV_HOME)/inactive.lst && cat $(DOTENV_HOME)/inactive.lst)))
 # The list of ACTIVE dotfiles, minus the ones
 PROFILE_ACTIVE   =$(filter-out $(PROFILE_INACTIVE),$(PROFILE_ALL))
 
@@ -86,7 +87,7 @@ $(DOTENV_USER_HOME)/.%: $(DOTENV_MANAGED)/% $(DOTENV_MANAGED)
 	@dotenv --api dotenv_managed_install "$@"
 
 # Creates/updates the MANAGED VERSION
-$(DOTENV_MANAGED)/%: $(DOTENV_ACTIVE)/% 
+$(DOTENV_MANAGED)/%: $(DOTENV_ACTIVE)/% $(DOTENV_CONFIG)
 	@dotenv --api dotenv_managed_make "$(DOTENV_USER_HOME)/.$*"
 
 # === HELPERS ==================================================================

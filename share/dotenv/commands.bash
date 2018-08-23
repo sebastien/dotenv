@@ -32,8 +32,10 @@ function command-dotenv {
 			echo "Usage: dotenv [OPTION] PROFILE|FILE…"
 			echo "Manages multiple dotfile configurations"
 			echo 
-			echo " -p PROFILE            Activates/creates the given profile"
-			echo " -p, --profiles        List available profiles"
+			echo "PROFILE"
+			echo " PROFILE               Activates the given profile"
+			echo " -p, --profile         List available profiles"
+			echo " -p, --profile PROFILE Activates/creates the given profile"
 			echo " -c, --configure       Configure the active profile"
 			echo 
 			echo " FILE…"
@@ -41,6 +43,8 @@ function command-dotenv {
 			echo " -u, --update          Updates all/given files based on the active profile"
 			echo " -r, --revert          Reverts all/given files that were previously managed"
 			echo " -e, --edit            Edits the given managed files(s)"
+			echo " -l, --list            Lists all the managed files"
+			echo " -l, --list FILE…      Outputs the contents of the managed file(s)"
 
 			;;
 		# =====================================================================
@@ -85,18 +89,24 @@ function command-dotenv {
 			exit 0
 			;;
 		-l|--list)
-			if [ -d "$DOTENV_MANAGED" ]; then
-				dotenv_managed_list | column -ts→
-				exit 0
-			elif [ ! -d "$DOTENV_PROFILES" ]; then
-				dotenv_info "No profile defined in $DOTENV_PROFILES"
-				dotenv_info "Use \`dotenv --create PROFILE\` to create a profile with the given name"
-			elif [ ! -d "$DOTENV_ACTIVE" ]; then
-				dotenv_info "No active profile, run dotenv with one of:"
-				dotenv_list "$(dotenv_profile_list)"
+			shift
+			if [ -z "$*" ]; then
+				if [ -d "$DOTENV_MANAGED" ]; then
+					dotenv_managed_list | column -ts→
+					exit 0
+				elif [ ! -d "$DOTENV_PROFILES" ]; then
+					dotenv_info "No profile defined in $DOTENV_PROFILES"
+					dotenv_info "Use \`dotenv --create PROFILE\` to create a profile with the given name"
+				elif [ ! -d "$DOTENV_ACTIVE" ]; then
+					dotenv_info "No active profile, run dotenv with one of:"
+					dotenv_list "$(dotenv_profile_list)"
+				else
+					dotenv_info "No managed files in profile $(dotenv_profile_active), add files with: dotenv -a FILES…"
+					exit 0
+				fi
 			else
-				dotenv_info "No managed files in profile $(dotenv_profile_active), add files with: dotenv -a FILES…"
-				exit 0
+				dotenv_managed_make "$@"
+				dotenv_managed_cat "$@"
 			fi
 			;;
 

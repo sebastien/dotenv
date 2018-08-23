@@ -223,7 +223,7 @@ $ dotenv -l
 - `dotenv -p|--profiles` ― lists the available profiles, where active
    profiles are prefixed with `*`.
 
-- `dotenv -c|--configure PROFILE?` ― edits the profile's configuration and
+- `dotenv -c|--configure` ― edits the profile's configuration and
    re-generates any file that depends on the configuration.
 
 ### Managing files
@@ -273,6 +273,10 @@ NOTE: This needs to interface with a version control system.
 
 - `dotenv -P|push PROFILE? TEMPLATE?` ― pulls the given profiles and/or templates,
    all by default.
+
+### Advanced
+
+- `dotenv --api COMMAND ARGS…`
 
 ## Similar tools
 

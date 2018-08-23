@@ -14,4 +14,5 @@ Edge cases
 [ ] Switching profiles: should restore the files
 [ ] User removes/add files from .dotenv/active, we need to sync the managed
 [ ] install: restore support for symlinks
+[ ] configure: output missing configuration variables
 
