@@ -32,7 +32,7 @@ function command-dotenv {
 			echo "Usage: dotenv [OPTION] PROFILE|FILE…"
 			echo "Manages multiple dotfile configurations"
 			echo 
-			echo " PROFILE               Activates/creates the given profile"
+			echo " -p PROFILE            Activates/creates the given profile"
 			echo " -p, --profiles        List available profiles"
 			echo " -c, --configure       Configure the active profile"
 			echo 
@@ -46,7 +46,7 @@ function command-dotenv {
 		# =====================================================================
 		# API
 		# =====================================================================
-		-a|--api)
+		--api)
 			shift
 			eval "$@"
 			exit 0
@@ -54,12 +54,12 @@ function command-dotenv {
 		# =====================================================================
 		# PROFILES
 		# =====================================================================
-		-c|--create)
-			dotenv_profile_create "$2"
-			exit 0
-			;;
 		-p|--profile|--profiles)
-			dotenv_profile_list
+			if [ -z "$2" ]; then
+				dotenv_profile_list
+			else
+				dotenv_profile_create "$2"
+			fi
 			exit 0
 			;;
 		-c|--config|--configure)

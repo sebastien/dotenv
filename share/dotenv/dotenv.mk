@@ -10,26 +10,38 @@
 # This makefile makes sure that the dotenv-managed directory is always
 # up-to-date with respect to the active profile. 
 # -----------------------------------------------------------------------------
+#
+# TODO: Re-generate when configuration changes
 
 # The paths to the dotenv files
 DOTENV_PATH     =$(HOME)/.dotenv
 DOTENV_ACTIVE   =$(DOTENV_PATH)/active
 DOTENV_USER_HOME=$(HOME)
 DOTENV_MANAGED  =$(DOTENV_PATH)/managed
+DOTENV_INACTIVE =$(DOTENV)/inactive.lst
 
-# The list of active files
-ACTIVE_SOURCES  =$(shell test -e $(DOTENV_ACTIVE) && find $(DOTENV_ACTIVE)/ -name "*" -not -type d)
+# The list of ALL active profile dotfiles, including the .tmpl and pre and post
+PROFILE_ALL      =$(shell test -e $(DOTENV_ACTIVE) && find $(DOTENV_ACTIVE)/ -name "*" -not -type d)
+# The list of INACTIVE dotfiles, as listed in the inactive.lst file
+PROFILE_INACTIVE =$(patsubst %,$(DOTENV_ACTIVE)/%,$(filter-out \#%,$(shell test -e $(DOTENV_PATH)/inactive.lst && cat $(DOTENV_PATH)/inactive.lst)))
+# The list of ACTIVE dotfiles, minus the ones
+PROFILE_ACTIVE   =$(filter-out $(PROFILE_INACTIVE),$(PROFILE_ALL))
 
-# The list of currently managed files
+MANAGED_ALL      =$(patsubst %.tmpl,%,$(patsubst %.pre,%,$(patsubst %.post,%,$(patsubst $(DOTENV_ACTIVE)/%,$(DOTENV_MANAGED)/%,$(PROFILE_ALL)))))
+MANAGED_INACTIVE =$(PROFILE_INACTIVE:$(DOTENV_ACTIVE)/%=$(DOTENV_MANAGED)/%)
+MANAGED_ACTIVE   =$(filter-out $(MANAGED_INACTIVE),$(MANAGED_ALL))
 
-# The list of
+# The listr of EXPECTED managed file, which is derived from the active sources
 MANAGED_EXISTING =$(shell test -e $(DOTENV_MANAGED) && find $(DOTENV_MANAGED)/ -name "*" -not -type d)
-MANAGED_PRODUCT  =$(patsubst %.pre,%,$(patsubst %.post,%,$(patsubst $(DOTENV_ACTIVE)/%,$(DOTENV_MANAGED)/%,$(ACTIVE_SOURCES))))
-MANAGED_CRUFT    =$(filter-out $(MANAGED_PRODUCT),$(MANAGED_EXISTING))
+MANAGED_MISSING  =$(filter-out $(MANAGED_EXISTING),$(MANAGED_ACTIVE))
+MANAGED_CRUFT    =$(filter-out $(MANAGED_ACTIVE),$(MANAGED_EXISTING))
 
-INSTALLED_ALL    =$(MANAGED_PRODUCT:$(DOTENV_MANAGED)/%=$(DOTENV_USER_HOME)/.%)
+# The list of currently installed files
+INSTALLED_ACTIVE =$(MANAGED_ACTIVE:$(DOTENV_MANAGED)/%=$(DOTENV_USER_HOME)/.%)
+INSTALLED_CRUFT  =$(MANAGED_CRUFT:$(DOTENV_MANAGED)/%=$(DOTENV_USER_HOME)/.%)
 
 .PHONY: info update clean
+
 
 # ----------------------------------------------------------------------------
 #
@@ -38,12 +50,25 @@ INSTALLED_ALL    =$(MANAGED_PRODUCT:$(DOTENV_MANAGED)/%=$(DOTENV_USER_HOME)/.%)
 # ----------------------------------------------------------------------------
 
 info:
-	@echo "Installed: $(INSTALLED_ALL)"
-	@echo "Managed(to build): $(MANAGED_PRODUCT)"
-	@echo "Managed(existing): $(MANAGED_EXISTING)"
-	@echo Cruft: $(MANAGED_CRUFT)
+	@echo "PROFILE"
+	@echo "   ALL      : $(PROFILE_ALL)"
+	@echo "   INACTIVE : $(PROFILE_INACTIVE)"
+	@echo "   ACTIVE   : $(PROFILE_ACTIVE)"
+	@echo "MANAGED"
+	@echo "   ALL      : $(MANAGED_ALL)"
+	@echo "   INACTIVE : $(MANAGED_INACTIVE)"
+	@echo "   ACTIVE   : $(MANAGED_ACTIVE)"
+	@echo "   EXISTING : $(MANAGED_EXISTING)"
+	@echo "   MISSING  : $(MANAGED_MISSING)"
+	@echo "   CRUFT    : $(MANAGED_CRUFT)"
+	@echo "INSTALLED"
+	@echo "   MISSING  : $(INSTALLED_MISSING)"
+	@echo "   CRUFT    : $(INSTALLED_CRUFT)"
 
-update: $(MANAGED_PRODUCT)
+update-managed: $(MANAGED_ALL)
+	
+update-installed: $(INSTALLED_ACTIVE)
+	
 
 clean: $(MANAGED_CRUFT)
 	@if [ ! -z "$(MANAGED_CRUFT)" ]; then \
@@ -56,13 +81,18 @@ clean: $(MANAGED_CRUFT)
 #
 # ----------------------------------------------------------------------------
 
-# Creates a symlink between a simple active file and the managed version
-$(DOTENV_MANAGED)/%: $(DOTENV_ACTIVE)/%
-	@dotenv --api dotenv_dir_copy_parents $(DOTENV_ACTIVE)/ $(DOTENV_MANAGED)/ $*
-	@ln -sfr "$<" "$@"
+# Installs the MANAGED VERSION into the user home
+$(DOTENV_USER_HOME)/.%: $(DOTENV_MANAGED)/% $(DOTENV_MANAGED)
+	@dotenv --api dotenv_managed_install "$@"
 
-# Installs the managed version into the user home
-$(DOTENV_USER_HOME)/.%: $(DOTENV_MANAGED)/%
-	@dotenv --api dotenv_managed_make "@"
+# Creates/updates the MANAGED VERSION
+$(DOTENV_MANAGED)/%: $(DOTENV_ACTIVE)/% 
+	@dotenv --api dotenv_managed_make "$(DOTENV_USER_HOME)/.$*"
+
+# === HELPERS ==================================================================
+#
+print-%:
+	@echo "$*="
+	@echo "$($*)" | xargs -n1 echo | sort -dr
 
 # EOF

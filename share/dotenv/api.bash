@@ -100,9 +100,9 @@ function dotenv_profile_create {
 	if [ -z "$PROFILE_NAME" ]; then
 		PROFILE_NAME="default"
 	fi
-	dotenv_info "Created profile: $PROFILE_NAME"
 	local PROFILE_PATH="$DOTENV_PROFILES/$PROFILE_NAME"
 	if [ ! -d "$PROFILE_PATH" ]; then
+		dotenv_info "Created profile: $PROFILE_NAME"
 		mkdir -p "$PROFILE_PATH"
 	fi
 }
@@ -159,13 +159,20 @@ function dotenv_profile_managed {
 function dotenv_profile_list {
 	local ALL
 	local NAME
+	local ACTIVE
 	if [ -z "$DOTENV_PROFILES" ]; then
 		dotenv_error "Environemnt variable DOTENV_PROFILES not defined"
 	elif [ "$ALL" = "$DOTENV_PROFILES/*" ]; then
 		dotenv_info "No templates defined in $DOTENV_PROFILES"
 	else
 		ALL=$(dotenv_dir_list "$DOTENV_PROFILES")
+		ACTIVE=$(readlink -f "$DOTENV_ACTIVE")
 		for NAME in $ALL; do
+			if [ "$NAME" == "$ACTIVE" ]; then
+				echo -n " "
+			else
+				echo -n "▶"
+			fi
 			basename "$NAME"
 		done
 	fi
@@ -513,20 +520,18 @@ function dotenv_managed_make {
 	dotenv_assert_active_profile
 	local FILE
 	for FILE in "$@"; do
+		dotenv_assert_file_is_dotfile "$FILE"
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_TARGET="$DOTENV_USER_HOME/.$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 		local FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_ACTIVE")"
-		# DEBUG
-		exit 1
 		if [ -e "$FILE" ]; then
 			# The file already exists, so we resolve it to its canoncial reference
 			FILE=$(readlink -f "$FILE")
 		elif [ -z "$FILE_FRAGMENTS" ]; then
 			# There is on fragment, nor managed version, nor existisng file
-			dotenv_error "$FILE does not exist in active profile: $FILE_ACTIVE"
-			exit 1
+			dotenv_fail "$FILE does not exist in active profile: $FILE_ACTIVE"
 		else
 			# There is no existing or managed, but fragments, so we create
 			# the managed version.
@@ -595,14 +600,12 @@ function dotenv_managed_install {
 		fi
 		if [ ! -e "$FILE" ]; then
 			# If the file does not exist, we simply install it
+			dotenv_info "Installing $FILE"
 			_dotenv_managed_install "$FILE"
-		elif [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
+		elif [ "$(readlink -f "$FILE")" == "$(readlink -f $FILE_MANAGED)" ]; then
 			# If the file is already managed, we re-install it, removing
 			# the old one.
-			if [ -e "$FILE" ]; then
-				chmod u+w "$FILE" ; rm "$FILE"
-			fi
-			_dotenv_managed_install "$FILE"
+			FILE="$FILE"
 		else
 			# Otherwise we try to backup the file
 			# TODO: We should check if both files are the same or not
@@ -610,11 +613,9 @@ function dotenv_managed_install {
 				dotenv_fail "File already exists in the backup: $FILE_BACKUP"
 			fi
 			# We backup the original dotfile
-			dotenv_info "Backing up existing file $FILE to $FILE_BACKUP"
+			dotenv_info "Backing up existing file $FILE to $FILE_BACKUP before replacing with managed version"
 			dotenv_backup_file "$FILE"
-			if [ -e "$FILE" ]; then
-				chmod u+w "$FILE" ; rm "$FILE"
-			fi
+			dotenv_file_remove "$FILE"
 			_dotenv_managed_install "$FILE"
 		fi
 	done
@@ -709,7 +710,6 @@ function dotenv_managed_revert {
 					# file and restore the backup (if any).
 					unlink "$TARGET"
 					if [ -e "$FILE_BACKUP" ] || [ -L "$FILE_BACKUP" ]; then
-						dotenv_info "Restoring backed up version of: $TARGET"
 						mv "$FILE_BACKUP" "$TARGET"
 						dotenv_dir_clean "$(dirname "$FILE_BACKUP")"
 					fi
