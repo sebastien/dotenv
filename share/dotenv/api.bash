@@ -268,6 +268,9 @@ function dotenv_profile_apply {
 				# TODO: Copy/apply file attributes
 				chmod -w "$FILE_MANAGED"
 			fi
+			if [ ! -e "$FILE_MANAGED" ]; then
+				dotenv_fail "dotenv/profile: Managed file does not exist: $FILE_MANAGED"
+			fi
 			ln -sfr "$FILE_MANAGED" "$TARGET"
 		else
 			if [ "$(dotenv_file_fragments_list "$FILE")" = "" ]; then
@@ -282,6 +285,9 @@ function dotenv_profile_apply {
 		fi
 		# 3) We symlink from the FILE_MANAGED to the TARGET in the user's
 		#    HOME.
+		if [ ! -e "$FILE_MANAGED" ]; then
+			dotenv_fail "dotenv_profile: Managed file does not exist: $FILE_MANAGED"
+		fi
 		ln -sfr "$FILE_MANAGED" "$TARGET"
 		dotenv_info ".$SUFFIX"
 	done
@@ -402,7 +408,6 @@ function dotenv_managed_list_installed {
 	fi
 }
 
-
 # NOTE: This function is complex and critical, it must be edited with care.
 function dotenv_managed_add {
 ## @param FILES the files to be managed
@@ -419,8 +424,12 @@ function dotenv_managed_add {
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
+		local FILE_ACTIVE_FRAGMENTS
+		if [ -d "$FILE" ]; then
+			dotenv_fail "dotenv can only managed files, not directories: $FILE"
+		fi
 		# NOTE: This might be better using a function call
-		local FILE_ACTIVE_FRAGMENTS=$(find "$DOTENV_ACTIVE" -name "$FILE_NAME" -name "$FILE_NAME.tmpl" -name "$FILE_NAME.pre" -name "$FILE_NAME.post" -name "$FILE_NAME.pre.*" -name "$FILE_NAME.post.*")
+		FILE_ACTIVE_FRAGMENTS=$(dotenv_file_fragments_list "$FILE_MANAGED")
 		# Is the file already managed?
 		if [ -e "$FILE_MANAGED" ]; then
 			# If the file is already managed, we can try to backup the 
@@ -455,10 +464,9 @@ function dotenv_managed_add {
 				dotenv_error "Given file is a directory. Dotenv can only manage files."
 				exit 1
 			else
-				# We create a copy of the canonical file. "cp -a" might
-				# actually be enough.
-				cat "$FILE_CANONICAL" > "$FILE_ACTIVE"
-				cp --attributes-only "$FILE" "$FILE_ACTIVE"
+				# We create a copy of the canonical file.
+				dotenv_dir_copy_parents "$DOTENV_USER_HOME/." "$DOTENV_ACTIVE/" "$FILE_NAME"
+				dotenv_file_copy "$FILE" "$FILE_ACTIVE"
 				# We recreate the managed file (in case there are fragments/templates)
 				dotenv_managed_make "$FILE"
 				# We finally create a symlink between the managed path and the HOME.
@@ -506,9 +514,12 @@ function dotenv_managed_make {
 	local FILE
 	for FILE in "$@"; do
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
+		local FILE_TARGET="$DOTENV_USER_HOME/.$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 		local FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_ACTIVE")"
+		# DEBUG
+		exit 1
 		if [ -e "$FILE" ]; then
 			# The file already exists, so we resolve it to its canoncial reference
 			FILE=$(readlink -f "$FILE")
@@ -522,6 +533,9 @@ function dotenv_managed_make {
 			# TODO: Copy/apply file attributes
 			dotenv_file_assemble "$FILE_ACTIVE_FRAGMENTS" > "$FILE_MANAGED"
 		fi
+		if [ ! -e "$FILE_ACTIVE" ] || [ -z "$FILE_FRAGMENTS" ]; then
+			dotenv_fail "dotenv/make: File or fragments not found in active profile: $FILE_ACTIVE"
+		fi
 		# We make sure to remove the managed file, as we're going to rebuild
 		# it. It might be a symlink or a regular file.
 		if [ -e "$FILE_MANAGED" ]; then
@@ -530,11 +544,13 @@ function dotenv_managed_make {
 		fi
 		# If there is only one regular file as a fragment, we symlink from
 		# the active profile to the managed.
+		dotenv_dir_copy_parents "$DOTENV_ACTIVE/" "$DOTENV_MANAGED/" "$FILE_NAME" 
 		if [ "$FILE_FRAGMENTS" == "f" ]; then
 			ln -sfr "$FILE_ACTIVE" "$FILE_MANAGED"
 		# Otherwise we assembe it
 		else
 			# TODO: Copy/apply file attributes
+			# TODO: What about the parent directories?
 			dotenv_file_assemble "$FILE_ACTIVE" > "$FILE_MANAGED"
 		fi
 		echo "$FILE_MANAGED"
@@ -637,7 +653,11 @@ function _dotenv_managed_install {
 			# Here the managed version is a file.
 			if [ ! -e "$FILE" ]; then
 				# If there's no target file, we link it
-				ln -sfr "$FILE_MANAGED" "$FILE"
+				if [ ! -e "$FILE_MANAGED" ]; then
+					dotenv_fail "dotenv/install: Managed file does not exist: $FILE_MANAGED"
+				else
+					ln -sfr "$FILE_MANAGED" "$FILE"
+				fi
 			elif [ "$(readlink "$FILE")" != "$FILE_MANAGED" ]; then
 				# If there's a file and it's not a link to our
 				# managed file, we back it up.
@@ -927,6 +947,73 @@ function dotenv_dir_clean {
 	fi
 }
 
+function dotenv_dir_copy_parents {
+	local PARENT_NAME
+	PARENT_NAME=$(dirname "$3")
+	if [ "$PARENT_NAME" != "." ]; then
+		dotenv_dir_copy_structure "$1" "$2" "$PARENT_NAME"
+	elif [ ! -d "$2" ]; then
+		mkdir "$2"
+	fi
+}
+
+function dotenv_dir_copy_structure {
+## @param SOURCE_PREFIX
+## @param DESTINATION_PREFIX
+	local SOURCE_PREFIX="$1"
+	local DESTINATION_PREFIX="$2"
+	local FILE_NAME="$3"
+	local PARENT_NAME=$(dirname "$3")
+	local SOURCE="$SOURCE_PREFIX$FILE_NAME"
+	local DESTINATION="$DESTINATION_PREFIX$FILE_NAME"
+	local SOURCE_CANONICAL
+	if [ ! -e "$SOURCE" ]; then
+		dotenv_fail "Source path does not exist: $SOURCE"
+	else
+		SOURCE_CANONICAL=$(readlink -f "$SOURCE")
+		if [ ! -d "$SOURCE_CANONICAL" ]; then
+			dotenv_fail "Source is not a directory: $SOURCE → $SOURCE_CANONICAL"
+		fi
+		if [ "$PARENT_NAME" != "." ]; then
+			dotenv_dir_copy_structure "$1" "$2" "$PARENT_NAME"
+		fi
+		# The source is a directory, so we make sure that the destination
+		# exists and is a directory as well.
+		if [ ! -d "$DESTINATION" ]; then
+			dotenv_file_remove "$DESTINATION"
+			mkdir -p "$DESTINATION"
+			chmod --reference "$SOURCE_CANONICAL" "$DESTINATION"
+			chown --reference "$SOURCE_CANONICAL" "$DESTINATION"
+			# TODO: We should also copy the xattrs, if possible
+		fi
+	fi
+}
+
+
+function dotenv_file_copy {
+## @param SOURCE
+## @param DESTINATION
+## Copies the given file and its directory
+	local SOURCE="$1"
+	local DESTINATION="$2"
+	dotenv_assert_file_is_dotfile "$SOURCE"
+	local FILE_NAME=${SOURCE#$DOTENV_USER_HOME/.}
+	SOURCE="$DOTENV_USER_HOME/.$FILE_NAME"
+	if [ ! -e "$SOURCE" ]; then
+		dotenv_fail "Source file does not exist: $SOURCE"
+	elif [ -d "$SOURCE" ];  then
+		dotenv_fail "Trying to copy a directory to a file: $SOURCE"
+	else
+		dotenv_dir_copy_parents "$DOTENV_USER_HOME/." "$DOTENV_MANAGED/" "$FILE_NAME"
+		if [ -d "$DESTINATION" ]; then
+			dotenv_fail "Trying to copy file $SOURCE over directory $DESTINATION"
+		else
+			dotenv_file_remove "$DESTINATION"
+			cp -a "$SOURCE" "$DESTINATION"
+		fi
+	fi
+}
+
 function dotenv_file_is_dotfile {
 ## @param FILE
 ## Echoes "OK" if the given file is a dotfile
@@ -1009,6 +1096,13 @@ function dotenv_file_assemble {
 				;;
 		esac
 	done
+}
+
+function dotenv_file_remove {
+## @param FILE the file or link to be removed
+	if [ -f "$1" ] || [ -L "$1" ]; then
+		chmod u+w "$1" ; unlink "$1"
+	fi
 }
 
 function dotenv_tmpl_apply {
