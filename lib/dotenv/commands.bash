@@ -62,7 +62,7 @@ function command-dotenv {
 		-p|--profile|--profiles)
 			if [ -z "$2" ]; then
 				dotenv_profile_list
-			elif [ "$2" == "none" ]; then
+			elif [ "$2" == "none" ]; then
 				dotenv_profile_revert
 			else
 				dotenv_profile_create "$2"

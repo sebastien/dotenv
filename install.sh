@@ -1,32 +1,48 @@
 #!/usr/bin/env bash
 PREFIX=~/.local
 BIN_FILES=$(echo bin/*)
-LIB_FILES=$(echo share/*/*.bash)
+LIB_FILES=$(echo lib/* lib/*/*.bash)
 ALL_FILES="$BIN_FILES $LIB_FILES"
-BASE="https://raw.githubusercontent.com/sebastien/dotenv/master"
+BASE_URL="https://raw.githubusercontent.com/sebastien/dotenv/master"
 
-if [ "$1" = "uninstall" ]; then
+if [ ! -e "$PREFIX" ]; then
+	echo "Prefix $PREFIX does not exist"
+	exit 1
+fi
+
+# We dispatch the arguments
+case $1 in
+uninstall)
+	# We uninstall all the files
 	for FILE in $ALL_FILES; do
 		FILE=$PREFIX/$FILE
-		if [ -e "$FILE" ]; then
+		if [ -e "$FILE" ] || [ -L "$FILE" ]; then
+			# TODO: We should clean empty directories
 			echo Removing "$FILE"
 			unlink "$FILE"
 		fi
 	done
-else
+	exit 0
+	;;
+install|link|*)
+	# We make sure the directories exist
 	if [ ! -d $PREFIX/bin ]; then
 		mkdir -p $PREFIX/bin
 	fi
+	# We iterate on all the files an install them
 	for FILE in $ALL_FILES; do
 		DST=$PREFIX/$FILE
 		DIR=$(dirname "$DST")
+		# We create the parent directory, if needed
 		if [ ! -d "$DIR" ]; then
 			mkdir -p "$DIR"
 		fi
+		# We erase any previous file
 		if [ -e "$DST" ]; then
 			echo Removing previous version "$DST"
 			unlink "$DST"
 		fi
+		# If the source file exists locally, we use it
 		if [ -f "$FILE" ]; then
 			SRC="$FILE"
 			if [ "$1" = "link" ]; then
@@ -36,15 +52,19 @@ else
 				echo Copying "$SRC" → "$DST"
 				cp -a "$SRC" "$DST"
 			fi
+		# Otherwise we need to get it from source and install it
+		# as is
 		else
-			SRC=$BASE/$FILE
+			SRC=$BASE_URL/$FILE
 			echo "Installing from remote source $SRC → $DST"
 			curl "$SRC" > "$DST"
 		fi
 	done
+	# We make sure the BIN files are executable, which
+	# might not be the case if they were downloaded
 	for FILE in $BIN_FILES; do
 		chmod +x "$PREFIX/$FILE"
 	done
-fi
+esac
 
 # EOF - vim: ts=4 sw=4 noet 
