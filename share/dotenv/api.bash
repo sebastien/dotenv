@@ -9,7 +9,7 @@
 #  \/__,_ /\/___/  \/__/\/____/\/_/\/_/\/__/
 #
 # -----------------------------------------------------------------------------
-# Shell API implementation
+# Dotenv shell API implementation
 # -----------------------------------------------------------------------------
 
 export DOTENV_API="0.0.0"
@@ -318,7 +318,7 @@ function dotenv_backup_restore {
 	local FILE
 	if [ -d "$DOTENV_BACKUP" ]; then
 		# For each file in the backup directory
-		find "$DOTENV_BACKUP" -name "*" -not -type d; while read -r FILE; do
+		find "$DOTENV_BACKUP" -name "*" -not -type d | while read -r FILE; do
 			# We determine the target directory
 			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_BACKUP/}
 			local TARGET_DIR;TARGET_DIR=$(dirname "$TARGET")
@@ -352,18 +352,19 @@ function dotenv_managed_list {
 ## Lists the files currently managed by the active profile.
 	local FILE
 	if [ -e "$DOTENV_MANAGED" ]; then
-		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
+		find "$DOTENV_MANAGED" -name "*" -not -type d | while read -r FILE; do
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
-			local ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
-			local EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
-			local INSTALLED="~/.$FILE_NAME"
+			local ACTUAL_TARGET;ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
+			local EXPECTED_TARGET;EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
+			local INSTALLED="$DOTENV_USER_HOME/.$FILE_NAME"
 			if [ "$ACTUAL_TARGET" != "$EXPECTED_TARGET" ]; then
 				INSTALLED="∅"
 			fi
-			local MANAGED=$DOTENV_MANAGED/$FILE_NAME
-			local FRAGMENTS=$(dotenv_file_fragment_types "$DOTENV_USER_HOME/.$FILE_NAME")
+			# We show the actual origin of the file
+			local MANAGED;MANAGED=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
+			local FRAGMENTS;FRAGMENTS=$(dotenv_file_fragment_types "$DOTENV_USER_HOME/.$FILE_NAME")
 			# TODO: We should output the paths relative to ~
-			echo $INSTALLED→$MANAGED→$FRAGMENTS
+			echo "$INSTALLED→$MANAGED→$FRAGMENTS"
 		done
 	fi
 }
@@ -376,7 +377,7 @@ function dotenv_managed_list_installed {
 	local ACTUAL_TARGET
 	local EXPECTED_TARGET
 	if [ -e "$DOTENV_MANAGED" ]; then
-		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
+		find "$DOTENV_MANAGED" -name "*" -not -type d | while read -r FILE; do
 			FILE_NAME="${FILE#$DOTENV_MANAGED/}"
 			ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
 			EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
@@ -416,7 +417,7 @@ function dotenv_managed_add {
 			if [ "$(readlink "$FILE")" == "$FILE_MANAGED" ]; then
 				dotenv_error "File is already managed : $FILE ← $FILE_MANAGED"
 			else
-				dotenv_error "File conflicts with managed file: $FILE_MANAGED $(readlink $FILE)"
+				dotenv_error "File conflicts with managed file: $FILE_MANAGED $(readlink "$FILE")"
 			fi
 		# Is there a file in the active profile?
 		elif [ -e "$FILE_ACTIVE" ]; then
@@ -572,7 +573,6 @@ function dotenv_managed_install {
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
-		local FILE_EXT="${FILE##*.}"
 		if [ ! -e "$FILE_MANAGED" ]; then
 			dotenv_fail "Managed file does not exist: $FILE_MANAGED"
 		fi
@@ -580,7 +580,7 @@ function dotenv_managed_install {
 			# If the file does not exist, we simply install it
 			dotenv_info " + $FILE"
 			_dotenv_managed_install "$FILE"
-		elif [ "$(readlink -f "$FILE")" == "$(readlink -f $FILE_MANAGED)" ]; then
+		elif [ "$(readlink -f "$FILE")" == "$(readlink -f "$FILE_MANAGED")" ]; then
 			# If the file is already managed, we don't have anything to do
 			# the old one.
 			FILE="$FILE"
@@ -615,10 +615,10 @@ function _dotenv_managed_install {
 		# Nothing to do in that case 
 		FILE="$FILE"
 	elif [ ! -z "$FILE_NAME" ]; then
-		local PARENT=$(dirname "$FILE")
+		local PARENT_NAME;PARENT_NAME=$(dirname "$FILE")
 		# We ensure that the parent exists
-		if [ ! -z "$PARENT" ]; then
-			_dotenv_managed_install "$PARENT"
+		if [ ! -z "$PARENT_NAME" ]; then
+			_dotenv_managed_install "$PARENT_NAME"
 		fi
 		# Is the managed file a directory?
 		if [ -d "$FILE_MANAGED" ]; then
@@ -717,13 +717,13 @@ function dotenv_configuration_extract {
 ## and outputs them as a sorted list of unique strings.
 	if [ -e "$1" ]; then
 		# Extracts the list of configuration variables from all these files
-		find "$1" -name "*.tmpl" -exec cat '{}' ';' | egrep -o '\${[A-Z_]+}' | tr -d '{}$' | sort | uniq
+		find "$1" -name "*.tmpl" -exec cat '{}' ';' | grep -o -e '\${[A-Z_]+}' | tr -d '{}$' | sort | uniq
 	fi
 }
 
 function dotenv_configuration_variables {
 ## Lists the configuration variables defined in the given file
-	cat "$1" | egrep -o '^\s*[A-Z_]+\s*=' | tr -d '= ' | sort | uniq
+	egrep -o '^\s*[A-Z_]+\s*=' < "$1" | tr -d '= ' | sort | uniq
 }
 
 function dotenv_configuration_create {
@@ -741,17 +741,17 @@ function dotenv_configuration_delta {
 ## Outputs a user-editable delta to update their configuration file. Takes
 ## a directory containing the TEMPLATE files and the CONFIG file
 ## defining the variables.
-	local DIR_VARS=$(dotenv_configuration_extract "$1")
+	local DIR_VARS;DIR_VARS=$(dotenv_configuration_extract "$1")
 	local CUR_VARS=""
 	if [ -e "$2" ]; then
 		CUR_VARS=$(dotenv_configuration_variables "$2")
 	fi
-	local DIR_TMP="$(mktemp)"
-	local CUR_TMP="$(mktemp)"
+	local DIR_TMP;DIR_TMP="$(mktemp)"
+	local CUR_TMP;CUR_TMP="$(mktemp)"
 	echo "$DIR_VARS" > "$DIR_TMP"
 	echo "$CUR_VARS" > "$CUR_TMP"
-	local MISSING=$(diff "$DIR_TMP" "$CUR_TMP" | grep '< ' | cut -d' ' -f 2)
-	local EXTRA=$(diff "$DIR_TMP" "$CUR_TMP" | grep '> ' | cut -d' ' -f 2)
+	local MISSING;MISSING=$(diff "$DIR_TMP" "$CUR_TMP" | grep '< ' | cut -d' ' -f 2)
+	local EXTRA;EXTRA=$(diff "$DIR_TMP" "$CUR_TMP" | grep '> ' | cut -d' ' -f 2)
 	rm "$DIR_TMP" "$CUR_TMP"
 	if [ ! -z "$MISSING" ] || [ ! -z "$EXTRA" ]; then
 		echo "# ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――"
@@ -791,7 +791,7 @@ function dotenv_template_apply {
 	elif [ -z "$TEMPLATE" ]; then
 		dotenv_error "TEMPLATE is expected"
 	elif [ ! -e "$DOTENV_TEMPLATES/$TEMPLATE" ]; then
-		dotenv_error "TEMPLATE \"$TEMPLATE\" not found at $DOTENV_TEMPLATE/$TEMPLATE"
+		dotenv_error "TEMPLATE \"$TEMPLATE\" not found at $DOTENV_TEMPLATES/$TEMPLATE"
 		dotenv_info  "Available templates:"
 		for TMPL in $(dotenv-template); do
 			echo " - $TMPL"
@@ -803,7 +803,7 @@ function dotenv_template_apply {
 		fi
 		# We generate or update the configuration file
 		local CONFIG_DOTENV="$DOTENV_PROFILES/$PROFILE/config.dotenv.sh"
-		local CONFIG_DELTA=$(dotenv_configuration_delta "$DOTENV_TEMPLATES/$TEMPLATE" "$CONFIG_DOTENV")
+		local CONFIG_DELTA;CONFIG_DELTA=$(dotenv_configuration_delta "$DOTENV_TEMPLATES/$TEMPLATE" "$CONFIG_DOTENV")
 		if [ ! -z "$CONFIG_DELTA" ]; then
 			echo "$CONFIG_DELTA" >> "$CONFIG_DOTENV"
 			$EDITOR "$CONFIG_DOTENV"
@@ -825,7 +825,7 @@ function dotenv_template_merge {
 	elif [ -z "$TEMPLATE" ]; then
 		dotenv_error "TEMPLATE is expected"
 	elif [ ! -e "$DOTENV_TEMPLATES/$PARENT" ]; then
-		dotenv_error "PARENT \"$PARENT\" not found at $DOTENV_TEMPLATE/$PARENT"
+		dotenv_error "PARENT \"$PARENT\" not found at $DOTENV_TEMPLATES/$PARENT"
 		dotenv_info  "Available templates:"
 		for FILE in $(dotenv-template); do
 			echo " - $FILE"
@@ -876,7 +876,7 @@ function dotenv_template_link_files {
 		local DEST_FILE="$TARGET/$SUFFIX"
 		if [ ! -z "$SUFFIX" ]; then
 			# We get the parent directory and create it if necessessary
-			local TARGET_PARENT=$(dirname "$DEST_FILE")
+			local TARGET_PARENT;TARGET_PARENT=$(dirname "$DEST_FILE")
 			if [ ! -z "$TARGET_PARENT" ] && [ ! -e "$TARGET_PARENT" ]; then
 				mkdir -p "$TARGET_PARENT"
 			fi
@@ -920,7 +920,7 @@ function dotenv_dir_clean {
 ##
 ## Removes any empty directory at the given `PATH`
 	# This makes sure that the suffix is not the home directory
-	local DIRPATH=$(readlink -f "$1")
+	local DIRPATH;DIRPATH=$(readlink -f "$1")
 	local SUFFIX=${DIRPATH#$DOTENV_USER_HOME}
 	if [ -d "$DIRPATH" ] && [ "$SUFFIX" != "" ] && [ "$SUFFIX" != "/" ]; then
 		find "$DIRPATH" -depth -type d -empty -exec rmdir '{}' ';'
@@ -950,7 +950,7 @@ function dotenv_dir_copy_structure {
 	local SOURCE_PREFIX="$1"
 	local DESTINATION_PREFIX="$2"
 	local FILE_NAME="$3"
-	local PARENT_NAME=$(dirname "$3")
+	local PARENT_NAME;PARENT_NAME=$(dirname "$3")
 	local SOURCE="$SOURCE_PREFIX$FILE_NAME"
 	local DESTINATION="$DESTINATION_PREFIX$FILE_NAME"
 	local SOURCE_CANONICAL
@@ -1139,10 +1139,11 @@ function dotenv_tmpl_apply {
 	else
 		# First, we get the list of fields from the $CONFIG file, which
 		# is supposed to be a shell script.
-		local FIELDS=$(grep -E "^(export\\s*)?[A-Z_]+\\s*=" "$CONFIG" | cut -d= -f1 | xargs echo)
+		local FIELDS;FIELDS=$(grep -E "^(export\\s*)?[A-Z_]+\\s*=" "$CONFIG" | cut -d= -f1 | xargs echo)
 		# FIXME: We might want to backup the environment
 		# Now we source the data file. If this goes wrong, the script is
 		# probably going to stop.
+		# shellcheck source=/dev/null
 		source "$CONFIG"
 		# Now we build a SED expression to replace the strings.
 		local SEDEXPR=""
@@ -1158,7 +1159,7 @@ function dotenv_tmpl_apply {
 		done
 		# Now we process the template using the sed expression that 
 		# we just created.
-		cat "$FILE" | sed "$SEDEXPR"
+		sed "$SEDEXPR" < "$FILE"
 	fi
 }
 

@@ -92,7 +92,7 @@ function command-dotenv {
 			shift
 			if [ -z "$*" ]; then
 				if [ -d "$DOTENV_MANAGED" ]; then
-					dotenv_managed_list | column -ts→
+					dotenv_managed_list | column -ts→ | sed "s|$HOME|~|g"
 					exit 0
 				elif [ ! -d "$DOTENV_PROFILES" ]; then
 					dotenv_info "No profile defined in $DOTENV_PROFILES"

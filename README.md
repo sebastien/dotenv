@@ -156,26 +156,40 @@ use of the following directories:
    a version control tool or rsync'ed from somewhere. The templates
    are really only useful if you'd like multiple profiles to share some elements.
 
-- `~/.dotenv/profiles/*`, which contains files merged from profile templates (`dotenv-apply TEMPLATE…`),
+- `~/.dotenv/profiles/*`, which contains files merged from profile templates
   *profile configuration* as well as additional files, file templates and file fragments.
+
+- `~/.dotenv/active`, a symlink to the active profile
 
 - `~/.dotenv/managed`, which contains all the files resulting from the 
   application of the active profile (`dotenv-apply PROFILE?`). These files are 
   going to be read-only if resulting from templates or file fragments, otherwise
   they will be a symlink to the original file in the profile.
 
+- `~/.dotenv/manifest`, which contains symlinks from all the files provided
+  by the active profile.
+
 - `~/.dotenv/backup`, which contains backups of any dotenv-managed files, so 
   that you can rollback to the environment exactly as it was.
 
+In addition to that, some files will influence how the dotenv manages files:
+
+- `~/.dotenv/active/dotenv.templates`, the optional list of templates to be merged in order
+   into the active profile.
+
+- `~/.dotenv/active/dotenv.config`, the optional profile configuration
+
+- `~/.dotenv/dotenv.config`, the optional global configuration
+
 Here's a table that illustrates how the dotfiles are built:
 
-| Template    | Profile               | Managed                    | $HOME
-| ---------   | ---------------       | ------------               | -------------------
-| *∅*             | **`inputrc`**             | *`inputrc`* *symlink*        | *`~/.inputrc`* *symlink*
+| Template        | Profile                   | Managed                    | $HOME
+| ---------       | ---------------           | ------------               | -------------------
+| *∅*             | **`inputrc`**             | *`inputrc`* *symlink*     | *`~/.inputrc`* *symlink*
 | *∅*             | **`hgrc.pre`**            | `hgrc.pre` *read-only*     | ↴
-| **`hgrc.tmpl`** | *`hgrc.tmpl`* *symlink* | `hgrc.tmpl` *read-only*    | ↴
-| **`hgrc.post`** | *`hgrc.post`* *symlink* | `hgrc.post` *read-only*    | ↴
-|  *∅*            | `hgrc.post.1`         | `hgrc.post.1` *read-only*  | *`~/.hgrc`* *read-only symlink*
+| **`hgrc.tmpl`** | *`hgrc.tmpl`* *symlink*   | `hgrc.tmpl` *read-only*    | ↴
+| **`hgrc.post`** | *`hgrc.post`* *symlink*   | `hgrc.post` *read-only*    | ↴
+|  *∅*            | `hgrc.post.1`             | `hgrc.post.1` *read-only*  | *`~/.hgrc`* *read-only symlink*
 
 
 ## How-to
@@ -196,7 +210,7 @@ $ dotenv -a ~/.bashrc
 
 ```
 $ dotenv -l
-~/.bashrc → ~/.dotenv/profile/personal/bashrc
+~/.bashrc     ~/.dotenv/profile/personal/bashrc
 ```
 
 ## Use cases
