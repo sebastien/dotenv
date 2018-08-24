@@ -23,7 +23,6 @@ DOTENV_PROFILES=$DOTENV_HOME/profiles
 DOTENV_BACKUP=$DOTENV_HOME/backup
 DOTENV_MANAGED=$DOTENV_HOME/managed
 DOTENV_ACTIVE=$DOTENV_HOME/active
-DOTENV_CONFIG=$DOTENV_HOME/config.sh
 DOTENV_MANIFEST=$DOTENV_HOME/manifest
 
 # TODO: Keep track of the signatures of the deployed files
@@ -104,7 +103,7 @@ function dotenv_assert_file_is_managed {
 
 
 function dotenv_profile_configure {
-	$EDITOR "$DOTENV_CONFIG"
+	$EDITOR "$DOTENV_ACTIVE/$CONFIG_NAME"
 	dotenv_profile_apply "$(dotenv_profile_active)"
 }
 
@@ -223,6 +222,7 @@ function dotenv_profile_revert {
 ## folder and resotring any existing backup.
 	# We start by reverting any already managed file
 	local FILE
+	# FIXME: Not good
 	if [ -e "$DOTENV_MANAGED" ]; then
 		local FILES_MANAGED
 		FILES_MANAGED="$(find "$DOTENV_MANAGED" -name "*" -not -type d)"
@@ -323,7 +323,12 @@ function dotenv_backup_restore {
 			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_BACKUP/}
 			local TARGET_DIR;TARGET_DIR=$(dirname "$TARGET")
 			if [ ! -d "$TARGET_DIR" ]; then
+				# TODO: We should actually copy the permissions
 				mkdir -p "$TARGET_DIR"
+			fi
+			# If the target is a directory, we remove it when empty
+			if [ -d "$TARGET" ]; then
+				dotenv_dir_clean "$TARGET"
 			fi
 			# We move back the backed up file to its original location
 			if [ ! -e "$TARGET" ]; then
@@ -331,7 +336,7 @@ function dotenv_backup_restore {
 			else
 				dotenv_error "Cannot restore backup \"$FILE\", \"$TARGET\" already exists."
 			fi
-			dotenv_info "restored $TARGET"
+			dotenv_info " > ~${TARGET#$DOTENV_USER_HOME}"
 		done
 		# We remove empty directories from the backup
 		dotenv_dir_clean "$DOTENV_BACKUP"
@@ -357,14 +362,15 @@ function dotenv_managed_list {
 			local ACTUAL_TARGET;ACTUAL_TARGET=$(readlink -f "$DOTENV_USER_HOME/.$FILE_NAME")
 			local EXPECTED_TARGET;EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
 			local INSTALLED="$DOTENV_USER_HOME/.$FILE_NAME"
+			local STATUS=" ✓ "
 			if [ "$ACTUAL_TARGET" != "$EXPECTED_TARGET" ]; then
-				INSTALLED="∅"
+				STATUS="   "
 			fi
 			# We show the actual origin of the file
 			local MANAGED;MANAGED=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
 			local FRAGMENTS;FRAGMENTS=$(dotenv_file_fragment_types "$DOTENV_USER_HOME/.$FILE_NAME")
 			# TODO: We should output the paths relative to ~
-			echo "$INSTALLED→$MANAGED→$FRAGMENTS"
+			echo "$STATUS→$INSTALLED→$MANAGED→$FRAGMENTS"
 		done
 	fi
 }
@@ -460,6 +466,10 @@ function dotenv_managed_add {
 
 # TODO: This is actually revert in the command line API
 function dotenv_managed_remove {
+	# NOTE: The caveat for this is that if you remove all the managed
+	# files like config/nvim/* but that config/nvim is a symlink and
+	# backed up as such (.dotenv/backups/config/nvim), then the
+	# original won't be restored.
 	local FILE
 	local FILE_NAME
 	local FILES="$*"
@@ -482,7 +492,43 @@ function dotenv_managed_remove {
 		else
 			dotenv_error "No backup ($FILE_BACKUP) or managed file ($FILE_MANAGED) for: $FILE"
 		fi
+		# We make sure that if there's no specific backup for this
+		# file that we clean up empty directories and restore parent
+		# backed up symlinks.
+		_dotenv_managed_revert_cleaner "$DOTENV_USER_HOME/." "$FILE"
 	done
+}
+
+function _dotenv_managed_revert_cleaner {
+## A helper function that will remove empty directories in the given
+## FILE up to BASE. Empty directories will be removed, and if there is
+## a backed up equivalent of FILE, it will be restored.
+##
+## This makes sure that when all the managed files have been removed in 
+## a subdirectory that any backed up parent is actually restored.
+##
+## @param BASE
+## @param FILE
+	local BASE="$1"
+	local FILE="${2%*/}"
+	local FILE_NAME=${FILE#$BASE}
+	if [ "$FILE" == "$FILE_NAME" ] || [ -z "$FILE" ] || [ "$FILE" == "$BASE" ] || [ "$FILE" == "/" ]; then
+		FILE="$FILE"
+	else
+		local PARENT;PARENT=$(dirname "$FILE")
+		if [ -e "$FILE" ] && [ -n "$(dotenv_dir_is_empty "$FILE")" ]; then
+			rmdir "$FILE"
+		fi
+		local FILE_BACKUP=$DOTENV_BACKUP/$FILE_NAME
+		if [ ! -e "$FILE" ] && [ ! -L "$FILE" ]; then
+			if [ -e "$FILE_BACKUP" ] || [ -L "$FILE_BACKUP" ]; then
+				# TODO: We might want to call dotenv_backup_restore
+				mv "$FILE_BACKUP" "$FILE"
+				PARENT="$BASE"
+			fi
+		fi
+		_dotenv_managed_revert_cleaner "$BASE" "$PARENT"
+	fi
 }
 
 function dotenv_managed_make {
@@ -572,7 +618,8 @@ function dotenv_managed_install {
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
 		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
-		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
+		local FILE_BACKUP
+		local FILE_ORIGIN;FILE_ORIGIN=$(dotenv_file_origin "$DOTENV_USER_HOME" "$FILE")
 		if [ ! -e "$FILE_MANAGED" ]; then
 			dotenv_fail "Managed file does not exist: $FILE_MANAGED"
 		fi
@@ -585,15 +632,40 @@ function dotenv_managed_install {
 			# the old one.
 			FILE="$FILE"
 		else
-			# Otherwise we try to backup the file
 			# TODO: We should check if both files are the same or not
-			if [ -e "$FILE_BACKUP" ]; then
-				dotenv_fail "File already exists in the backup: $FILE_BACKUP"
-			fi
 			# We backup the original dotfile
-			dotenv_info " ~ $FILE"
-			dotenv_backup_file "$FILE"
-			dotenv_file_remove "$FILE"
+			if [ "$FILE" != "$FILE_ORIGIN" ]; then
+				# The file we're going to replace is contained in a symlinked
+				# directory, so we need to move the whole thing and recreate
+				# the same structure locally.
+				#
+				# For instance:
+				#
+				# ~/.vim                  SYMLINK TO  ~/.dofiles/vim
+				# ~/.vim/scripts/init.vim         IS ACTUALLY ~/.dotfiles/vim/scripts/init.vim
+				#
+				# installing ~/.vim/scripts/init.vim will:
+				#
+				# 1) Backup ~/.vim to ~/.dotenv/backups/vim
+				# 2) Unlink ~/.vim
+				# 3) Install the managed version
+				FILE_BACKUP="$DOTENV_BACKUP/${FILE_ORIGIN#$DOTENV_USER_HOME/.}"
+				if [ -e "$FILE_BACKUP" ]; then
+					dotenv_fail "Symlink already exists in the backup: $FILE_BACKUP"
+				fi
+				# We backup the origin (which is a symlink)
+				dotenv_backup_file "$FILE_ORIGIN"
+				# We remove the origin, as we don't need it anymore
+				dotenv_file_remove "$FILE_ORIGIN"
+			else
+				FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
+				if [ -e "$FILE_BACKUP" ]; then
+					dotenv_fail "File already exists in the backup: $FILE_BACKUP"
+				fi
+				dotenv_backup_file "$FILE"
+				dotenv_file_remove "$FILE"
+			fi
+			dotenv_info " < $FILE"
 			_dotenv_managed_install "$FILE"
 		fi
 	done
@@ -625,8 +697,7 @@ function _dotenv_managed_install {
 			if [ ! -e "$FILE" ]; then
 				# NOTE: We don't need -p here as we've recursed on the parent
 				# already
-				mkdir "$FILE"
-				cp --attributes-only "$FILE_MANAGED" "$FILE"
+				dotenv_dir_copy_structure "$DOTENV_MANAGED/" "$DOTENV_USER_HOME/." "$FILE_NAME"
 			fi
 		else
 			# Here the managed version is a file.
@@ -927,6 +998,13 @@ function dotenv_dir_clean {
 	fi
 }
 
+function dotenv_dir_is_empty {
+	if [ -e "$1" ] && [ -n "$(find "$1" -prune -empty 2> /dev/null)" ]; then
+		echo "EMPTY"
+	fi
+}
+
+
 function dotenv_dir_copy_parents {
 ## Copies the struture of the parent directory of the given
 ## FILE relative to the SOURCE in DESTINATION
@@ -975,7 +1053,6 @@ function dotenv_dir_copy_structure {
 		fi
 	fi
 }
-
 
 function dotenv_file_copy {
 ## @param SOURCE
@@ -1115,8 +1192,33 @@ function dotenv_file_assemble {
 
 function dotenv_file_remove {
 ## @param FILE the file or link to be removed
-	if [ -f "$1" ] || [ -L "$1" ]; then
+	if [ -L "$1" ]; then
+		unlink "$1"
+	elif [ -f "$1" ]; then
 		chmod u+w "$1" ; unlink "$1"
+	fi
+}
+
+function dotenv_file_origin {
+## Retrieves the origina for the given FILE, stopping at BASE. 
+## The **origin** is going to be the FILE unless the FILE is 
+## contained in a symlinked directory up to BASE. In this case,
+## the symlinked closest to BASE will be returned.
+##
+## @param BASE 
+## @param FILE
+## @param ORIGIN
+	local BASE="${1%*/}"
+	local FILE="$2"
+	local ORIGIN="$3"
+	local PARENT;PARENT=$(dirname "$FILE")
+	if [ -z "$ORIGIN" ] || [ -L "$FILE" ]; then
+		ORIGIN="$FILE"
+	fi
+	if [ "$PARENT" == "." ] || [ "$PARENT" == "/" ] || [ "$FILE" == "$BASE" ]; then
+		echo "$ORIGIN"
+	else
+		dotenv_file_origin "$BASE" "$PARENT" "$ORIGIN"
 	fi
 }
 
@@ -1132,7 +1234,7 @@ function dotenv_tmpl_apply {
 	local FILE="$1"
 	local CONFIG="$2"
 	if [ -z "$CONFIG" ]; then
-		CONFIG="$DOTENV_CONFIG"
+		CONFIG="$DOTENV_ACTIVE/$CONFIG_NAME"
 	fi
 	if [ ! -e "$CONFIG" ]; then
 		dotenv_fail "Configuration file $CONFIG does not exist"

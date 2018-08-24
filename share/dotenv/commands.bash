@@ -37,6 +37,7 @@ function command-dotenv {
 			echo " -p, --profile         List available profiles"
 			echo " -p, --profile PROFILE Activates/creates the given profile"
 			echo " -c, --configure       Configure the active profile"
+			echo " -R, --revert-profile  Reverts the profile"
 			echo 
 			echo " FILE…"
 			echo " -a, --add             Adds the given files to the active profile"
@@ -61,9 +62,15 @@ function command-dotenv {
 		-p|--profile|--profiles)
 			if [ -z "$2" ]; then
 				dotenv_profile_list
+			elif [ "$2" == "none" ]; then
+				dotenv_profile_revert
 			else
 				dotenv_profile_create "$2"
 			fi
+			exit 0
+			;;
+		-R|--revert-profile)
+			dotenv_profile_revert
 			exit 0
 			;;
 		-c|--config|--configure)

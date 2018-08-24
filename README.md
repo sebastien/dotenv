@@ -1,4 +1,4 @@
-# dotenv ― profile templates and multiple profiles per user
+# dotenv ― Collaboartive dotfiles manager
 
 ```
      __          __
@@ -10,31 +10,33 @@
     \/__,_ /\/___/  \/__/\/____/\/_/\/_/\/__/
 ```
 
-`dotenv` is a *dotfiles manager* that is designed 
-to **share and extend profile environments**. With dotenv, it is possible
-to use an existing set of configuration files and extend them locally, without
-breaking upstream compatibility.
+`dotenv` is a *dotfiles manager* that is designed to support sharing,
+extending and switching between different profiles. In practice, you can
+use dotenv to:
+
+- Provide a customizable, pre-configured environment for new developers
+- Create configurable templates for your favorite tools
+- Use your own environment when helping a coworker
 
 This makes `dotenv` best suited for environments where many developers want to
 share a common setup, while allowing  for individual configuration and 
 customization.
 
 `dotenv` also works well in a single-user setup where you have multiple
-environments on the same machine, or an environment with machine-specific changes.
+environments on the same machine, or an single environment with machine-specific changes.
 
 Features:
 
-- **Profile templates**: dotfiles templates can be combined and filled in
+- **Templates**: dotfiles templates can be combined and filled in
   with profile-specific variables.
 
 - **Multiple profiles**: instantly switch between different sets of dotfiles
   without losing any change.
-  
+
 - **Safe**: `dotenv` will never override a file that it does not manages, and keeps
   backups of existing files it replaces.
 
-- **Gradual transition**: progressively migrate your dotfiles using `dotenv-manage`
-
+- **Gradual transition**: progressively migrate your dotfiles using `dotenv -a`
 
 ## Quick Start
 
@@ -47,17 +49,17 @@ $ curl https://raw.githubusercontent.com/sebastien/dotenv/master/install.sh | ba
 Now, start managing your existing configuration files and directories using `dotenv`
 
 ``` 
-$ dotenv-manage ~/.bashrc ~/.vimrc ~/.vim
+$ dotenv -a ~/.bashrc ~/.vimrc ~/.vim
 ```
 
 This will move these files to `~/.dotenv/profiles/default` and create symlinks
 for them. If you'd like to see the files managed by dotenv at any time:
 
 ```
-$ dotenv
-~/.bashrc → ~/.dotenv/managed/bashrc
-~/.vimrc → ~/.dotenv/managed/vimrc
-~/.vim → ~/.dotenv/managed/vim
+$ dotenv -l
+~/.bashrc	~/.dotenv/managed/bashrc
+~/.vimrc	~/.dotenv/managed/vimrc
+~/.vim		~/.dotenv/managed/vim
 ```
 
 ## What can dotenv do?
@@ -73,7 +75,8 @@ configuration files (shell setup, editor defaults, gitrc/hgrc, etc), and that
 you'd like to bring your own dotfiles as well. Without dotenv, you'd copy the
 files and edit them locally. But what happens if you've updated your dotfiles at 
 home and would like to propagate the update to the files at work? What if the
-company has updated the original configuration files?
+company has updated the original configuration files and you'd like to use them
+without losing your changes?
 
 ### Profile templates
 
@@ -81,18 +84,10 @@ Dotenv introduces the notion of **profile template** to do just that: a profile
 template is a collection of files (just like a profile) that can be **merged into
 a profile**. You can have a *company profile template* (`~/.dotenv/templates/company`)
 and a *personal profile template* (`~/.dotenv/templates/personal`) and **merge
-both** into your default dotenv profile:
+both** into your default dotenv profile.
 
-```
-$ dotenv-apply company
-@default/bash/company_setup.sh ← company:bash/company_setup.sh
-@default/vim/company_setup.vim ← company:vim/company_setup.vim
+You can also provide profile templates for specific tools:
 
-$ dotenv-apply personal
-@default/bashrc ← personal:bashrc
-@default/bash/local.sh ← personal:bash/local.sh
-@default/vimrc ← company:vimrc
-```
 
 ### File templates
 
@@ -119,7 +114,7 @@ file as `~/dotenv/company/hgrc.tmpl`, the file template will be expanded to
 
 Because you might not want to leak all these variables in an exported
 environment each profile contains a **profile configuration**
-(`~/.dotenv/profiles/*/config.dotenv.sh`), which is a bash script that defines
+(`~/.dotenv/profiles/*/dotenv.config`), which is a bash script that defines
 the variables to be expanded when updating a template file.
 
 ### File fragments
@@ -136,8 +131,7 @@ makes it possible with **file fragments**. A file fragment is defined in a
 When applying a profile, dotenv will *assemble* the fragments into one file:
 
 ```
-$ dotenv-apply
-~/.hgrc ← personal:hgrc.pre company:hgrc.tmpl personal:hgrc.post
+$ dotenv -u
 ```
 
 If there are many fragments, like `hgrc.pre hgrc.pre.0 hgrc.tmpl hg.post.tmpl`,
@@ -191,6 +185,23 @@ Here's a table that illustrates how the dotfiles are built:
 | **`hgrc.post`** | *`hgrc.post`* *symlink*   | `hgrc.post` *read-only*    | ↴
 |  *∅*            | `hgrc.post.1`             | `hgrc.post.1` *read-only*  | *`~/.hgrc`* *read-only symlink*
 
+`dotenv` pays particular attention to *managing symlinks*. For instance, if you have the 
+following layout:
+
+```
+~/.vim → ~/.mydotfiles/vim
+~/.mydotfiles/vim/init.vim
+~/.dotenv/active/.vim/init.vim
+```
+
+and you do 
+
+```
+$ dotenv -u ~/.vim/init.vim
+```
+
+then `dotenv` will detect that `~/.vim/init.vim` is actually contained in a
+symlink `~/.vim`, which will be directly backed up instead of ~ /.vim/init.vim`
 
 ## How-to
 
@@ -205,23 +216,15 @@ $ dotenv personal
 
 ```
 $ dotenv -a ~/.bashrc
-~/.bashrc → ~/.dotenv/profile/personal/bashrc
-```
-
-```
 $ dotenv -l
-~/.bashrc     ~/.dotenv/profile/personal/bashrc
+~/.bashrc	~/.dotenv/profile/personal/bashrc
 ```
 
 ## Use cases
 
-### Manage my configuration files on one machine
+## Create a customizable standard configuration 
 
-### Manage my configuration files on MANY machines
-
-### Manage multiple profiles on one machine
-
-### Create a dotfile template for new members of an organization
+## Share the configuration of all team members
 
 ## Command-line reference
 
@@ -240,6 +243,8 @@ $ dotenv -l
 - `dotenv -c|--configure` ― edits the profile's configuration and
    re-generates any file that depends on the configuration.
 
+- `dotenv -t|--template` ― edits the profile's templates
+
 ### Managing files
 
 - `dotenv -a|--add FILE…` ― adds the given dotfiles to the active profile, 
@@ -255,22 +260,6 @@ $ dotenv -l
 
 - `dotenv -e FILE…` ― edits the original file(s) that were used to create the
   given files and re-apply the profile.
-
-### Templates
-
-Templates are similar to profiles (they contain a set of dotfiles), and can
-be combined with a profile.
-
-- `dotenv -A|--apply-template TEMPLATE…` ―  applies the given template
-   to the given profile (active profile by default).
-
-- `dotenv -R|--remove-template TEMPLATE…` ―  unapplies the given template from
-  the active profile.
-
-- `dotenv -L|--list-templates` ―  lists the available templates
-
-- `dotenv -L|--list-template TEMPLATE` ―  lists the files available in the given
-  template.
 
 ### Building and syncing
 
