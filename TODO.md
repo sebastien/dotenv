@@ -9,6 +9,7 @@ Edge cases
 ==========
 
 [X] dotenv -r FILE should restore the original backup if present
+[ ] dotenv -r ~/config should revert `~/.config/*`
 [ ] dotenv -a ~/.hgignore cp complains files are the same
 [ ] dotenv -u: backs up too many files!
 [ ] Switching profiles: should restore the files

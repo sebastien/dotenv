@@ -332,16 +332,21 @@ function dotenv_backup_restore {
 			fi
 			# We move back the backed up file to its original location
 			if [ ! -e "$TARGET" ]; then
+				dotenv_info " = ~${TARGET#$DOTENV_USER_HOME}"
 				mv "$FILE" "$TARGET"
 			else
-				dotenv_error "Cannot restore backup \"$FILE\", \"$TARGET\" already exists."
+				dotenv_error "Cannot restore backup: $FILE"
+				if [ -d "$TARGET" ]; then
+					dotenv_error "Target directory is not empty: $TARGET"
+				else
+					dotenv_error "Target already exists: $TARGET"
+				fi
 			fi
-			dotenv_info " > ~${TARGET#$DOTENV_USER_HOME}"
 		done
 		# We remove empty directories from the backup
 		dotenv_dir_clean "$DOTENV_BACKUP"
 		if [ -e "$DOTENV_BACKUP" ] ; then
-			dotenv_error "Could not fully restore backup, some files already exist:"
+			dotenv_error "Could not fully restore backup, some files already exist."
 			exit 1
 		fi
 	fi
@@ -523,6 +528,7 @@ function _dotenv_managed_revert_cleaner {
 		if [ ! -e "$FILE" ] && [ ! -L "$FILE" ]; then
 			if [ -e "$FILE_BACKUP" ] || [ -L "$FILE_BACKUP" ]; then
 				# TODO: We might want to call dotenv_backup_restore
+				dotenv_info " = $FILE"
 				mv "$FILE_BACKUP" "$FILE"
 				PARENT="$BASE"
 			fi
@@ -761,6 +767,8 @@ function dotenv_managed_revert {
 					# file and restore the backup (if any).
 					unlink "$TARGET"
 					if [ -e "$FILE_BACKUP" ] || [ -L "$FILE_BACKUP" ]; then
+						# TODO: Should have a restore backup function
+						dotenv_info " = $TARGET"
 						mv "$FILE_BACKUP" "$TARGET"
 						dotenv_dir_clean "$(dirname "$FILE_BACKUP")"
 					fi
