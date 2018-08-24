@@ -9,8 +9,13 @@
 #  \/__,_ /\/___/  \/__/\/____/\/_/\/_/\/__/
 #
 # -----------------------------------------------------------------------------
+# Shell API implementation
+# -----------------------------------------------------------------------------
 
 export DOTENV_API="0.0.0"
+
+TEMPLATE_NAME=dotenv.templates
+CONFIG_NAME=dotenv.config
 DOTENV_USER_HOME=$HOME
 DOTENV_HOME=$HOME/.dotenv
 DOTENV_TEMPLATES=$DOTENV_HOME/templates
@@ -19,9 +24,7 @@ DOTENV_BACKUP=$DOTENV_HOME/backup
 DOTENV_MANAGED=$DOTENV_HOME/managed
 DOTENV_ACTIVE=$DOTENV_HOME/active
 DOTENV_CONFIG=$DOTENV_HOME/config.sh
-DOTENV_INACTIVE=$DOTENV_HOME/inactive.lst
-DOTENV_BASE=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")
-DOTENV_MAKEFILE=$DOTENV_BASE/dotenv.mk
+DOTENV_MANIFEST=$DOTENV_HOME/manifest
 
 # TODO: Keep track of the signatures of the deployed files
 
@@ -102,7 +105,7 @@ function dotenv_assert_file_is_managed {
 
 function dotenv_profile_configure {
 	$EDITOR "$DOTENV_CONFIG"
-	dotenv_profile_apply $(dotenv_profile_active)
+	dotenv_profile_apply "$(dotenv_profile_active)"
 }
 
 function dotenv_profile_create {
@@ -120,13 +123,14 @@ function dotenv_profile_create {
 
 function dotenv_profile_active {
 	if [ -e "$DOTENV_ACTIVE" ]; then
-		dotenv_output $(basename $(readlink "$DOTENV_ACTIVE"))
+		dotenv_output "$(basename "$(readlink "$DOTENV_ACTIVE")")"
 	else
 		dotenv_fail "dotenv/profile: No active profile"
 	fi
 }
 
 function dotenv_profile_manifest_raw {
+## Returns the list of files from the manifest
 	local FILE
 	local PROFILE="$1"
 	local PROFILE_PATH
@@ -149,24 +153,47 @@ function dotenv_profile_manifest_raw {
 		dotenv_fail "Profile does not exist in $DOTENV_PROFILES or $DOTENV_TEMPLATES: $PROFILE"
 	fi
 	# Now, if the profile has a template file, we recurse
-	local TEMPLATE_FILE="$PROFILE_PATH/dotenv.templates.lst"
+	local TEMPLATE_FILE="$PROFILE_PATH/$TEMPLATE_NAME"
 	if [ -e "$TEMPLATE_FILE" ]; then
-		for TEMPLATE in $(cat "$TEMPLATE_FILE"); do
+		while read -r TEMPLATE; do
 			dotenv_profile_manifest_raw "$TEMPLATE"
-		done
+		done < "$TEMPLATE_FILE"
 	fi
 	# And now we output the files by profile
-	for FILE in $(find -L "$PROFILE_PATH" -name "*" -not -type d -not -name "$CONFIG_NAME"); do
+	find -L "$PROFILE_PATH" -name "*" -not -type d -not -name "$CONFIG_NAME" -not -name "$TEMPLATE_NAME" | while read -r FILE; do
 		local FILE_NAME=${FILE#$PROFILE_PATH/}
-		local FILE_KEY=$(echo "$FILE_NAME" | sed 's/\.pre\..//g;s/\.post\..//g;s|.pre||g;s|.post||g;s|.tmpl||g')
-		echo "$FILE_KEY|$FILE"
+		echo "$FILE_NAME|$FILE"
+	done
+}
+
+function dotenv_profile_manifest_build {
+## Creates links to all the files in the manifest into $DOTENV_MANIFEST.
+## This makes sure that all files are linked from the available templates.
+	# We clean the existing manifest file
+	if [ -d "$DOTENV_MANIFEST" ]; then
+		find "$DOTENV_MANIFEST" -type l -exec unlink '{}' ';'
+		dotenv_dir_clean "$DOTENV_MANIFEST"
+	fi
+	# We create the manifest
+	if [ ! -d "$DOTENV_MANIFEST" ]; then
+		mkdir -p "$DOTENV_MANIFEST"
+	fi
+	local FILE
+	for FILE in $(dotenv_profile_manifest_raw "$1"); do
+		local FILE_ORIGIN="${FILE#*|}"
+		local FILE_NAME=${FILE%|*}
+		local FILE_SOURCE=${FILE_ORIGIN%*/$FILE_NAME}
+		dotenv_dir_copy_parents "$FILE_SOURCE"/ "$DOTENV_MANIFEST"/ "$FILE_NAME"
+		ln -sfr "$FILE_ORIGIN" "$DOTENV_MANIFEST/$FILE_NAME"
 	done
 }
 
 function dotenv_profile_manifest {
 ## Lists the files defined in the given `profile`.
-## @param profile
-	dotenv_profile_manifest_raw "$1" |  cut -d'|' -f1 | sort | uniq
+##
+## @param PROFILE
+	# NOTE: We make sure to filter out the dotenv configuration files
+	dotenv_profile_manifest_raw "$1" |  cut -d'|' -f1 | grep -e '^dotenv\.' -v | sed 's/\.pre\..//g;s/\.post\..//g;s|.pre||g;s|.post||g;s|.tmpl||g' | sort | uniq
 }
 
 function dotenv_profile_list {
@@ -197,7 +224,8 @@ function dotenv_profile_revert {
 	# We start by reverting any already managed file
 	local FILE
 	if [ -e "$DOTENV_MANAGED" ]; then
-		local FILES_MANAGED="$(find "$DOTENV_MANAGED" -name "*" -not -type d)"
+		local FILES_MANAGED
+		FILES_MANAGED="$(find "$DOTENV_MANAGED" -name "*" -not -type d)"
 		# We revert any managed file
 		dotenv_managed_revert "$FILES_MANAGED"
 		# Now we can safely remove all the managed files
@@ -244,6 +272,8 @@ function dotenv_profile_apply {
 		dotenv_profile_revert
 		ln -sfr "$DOTENV_PROFILES/$PROFILE" "$DOTENV_ACTIVE"
 	fi
+	# We build the manifest cache for this profile
+	dotenv_profile_manifest_build "$PROFILE"
 	# Now we iterate on all the files that are part of the current profile
 	for FILE in $(dotenv_profile_manifest "$PROFILE"); do
 		local FILE_NAME=${FILE#$DOTENV_PROFILES/$1/}
@@ -260,7 +290,7 @@ function dotenv_backup_file {
 	for FILE in "$@"; do
 		dotenv_assert_file_is_dotfile "$FILE"
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
-		local PARENT_NAME=$(dirname "$FILE_NAME")
+		local PARENT_NAME;PARENT_NAME=$(dirname "$FILE_NAME")
 		local FILE_BACKUP="$DOTENV_BACKUP/$FILE_NAME"
 		local FILE_BACKUP_PARENT="$DOTENV_BACKUP/$PARENT_NAME"
 		if [ -e "$FILE_BACKUP" ]; then
@@ -288,10 +318,10 @@ function dotenv_backup_restore {
 	local FILE
 	if [ -d "$DOTENV_BACKUP" ]; then
 		# For each file in the backup directory
-		for FILE in $(find "$DOTENV_BACKUP" -name "*" -not -type d); do
+		find "$DOTENV_BACKUP" -name "*" -not -type d; while read -r FILE; do
 			# We determine the target directory
 			local TARGET=$DOTENV_USER_HOME/.${FILE#$DOTENV_BACKUP/}
-			local TARGET_DIR=$(dirname "$TARGET")
+			local TARGET_DIR;TARGET_DIR=$(dirname "$TARGET")
 			if [ ! -d "$TARGET_DIR" ]; then
 				mkdir -p "$TARGET_DIR"
 			fi
@@ -319,7 +349,7 @@ function dotenv_backup_restore {
 # -----------------------------------------------------------------------------
 
 function dotenv_managed_list {
-## Lists the files currently managed by dotenv
+## Lists the files currently managed by the active profile.
 	local FILE
 	if [ -e "$DOTENV_MANAGED" ]; then
 		for FILE in $(find "$DOTENV_MANAGED" -name "*" -not -type d ); do
@@ -328,10 +358,10 @@ function dotenv_managed_list {
 			local EXPECTED_TARGET=$(readlink -f "$DOTENV_MANAGED/$FILE_NAME")
 			local INSTALLED="~/.$FILE_NAME"
 			if [ "$ACTUAL_TARGET" != "$EXPECTED_TARGET" ]; then
-				INSTALLED=""
+				INSTALLED="∅"
 			fi
 			local MANAGED=$DOTENV_MANAGED/$FILE_NAME
-			local FRAGMENTS=$(dotenv_file_fragment_list "$INSTALLED")
+			local FRAGMENTS=$(dotenv_file_fragment_types "$DOTENV_USER_HOME/.$FILE_NAME")
 			# TODO: We should output the paths relative to ~
 			echo $INSTALLED→$MANAGED→$FRAGMENTS
 		done
@@ -408,7 +438,8 @@ function dotenv_managed_add {
 			# Here we know that the file is not managed and does not exist
 			# in the active profile, and has no existing backup.
 			# We create the file in the active profile. We copy its contents
-			local FILE_CANONICAL=$(readlink -f "$FILE")
+			local FILE_CANONICAL
+			FILE_CANONICAL=$(readlink -f "$FILE")
 			if [ -d "$FILE_CANONICAL" ]; then
 				dotenv_error "Given file is a directory. Dotenv can only manage files."
 				exit 1
@@ -454,11 +485,13 @@ function dotenv_managed_remove {
 }
 
 function dotenv_managed_make {
-## @param FILES* these paths are relative to home
-## @output:stdout The path for each managed file corresponding to the given path
-##
 ## Looks for each of the given `FILE`s in the active profile, and links
 ## the file or assembles its fragments into `~/.dotenv/managed`, output.
+##
+## NOTE: The profile's manifest should be built at that stage.
+##
+## @param  FILES ― these paths are relative to home
+## @output The path for each managed file corresponding to the given path
 	dotenv_assert_active_profile
 	local FILE
 	for FILE in "$@"; do
@@ -466,17 +499,18 @@ function dotenv_managed_make {
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_TARGET="$DOTENV_USER_HOME/.$FILE_NAME"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
-		local FILE_ACTIVE="$DOTENV_ACTIVE/$FILE_NAME"
-		local FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_TARGET")"
+		local FILE_MANIFEST="$DOTENV_MANIFEST/$FILE_NAME"
+		local FILE_FRAGMENTS
+		FILE_FRAGMENTS="$(dotenv_file_fragment_types "$FILE_TARGET")"
 		if [ -e "$FILE" ]; then
 			# The file already exists, so we resolve it to its canoncial reference
 			FILE=$(readlink -f "$FILE")
 		elif [ -z "$FILE_FRAGMENTS" ]; then
 			# There is on fragment, nor managed version, nor existisng file
-			dotenv_fail "$FILE does not exist in active profile: $FILE_ACTIVE"
+			dotenv_fail "$FILE does not exist in active profile: $FILE_MANIFEST"
 		fi
-		if [ ! -e "$FILE_ACTIVE" ] && [ -z "$FILE_FRAGMENTS" ]; then
-			dotenv_fail "dotenv/make: File or fragments not found in active profile: $FILE_ACTIVE"
+		if [ ! -e "$FILE_MANIFEST" ] && [ -z "$FILE_FRAGMENTS" ]; then
+			dotenv_fail "dotenv/make: File or fragments not found in active profile: $FILE_MANIFEST"
 		fi
 		# We make sure to remove the managed file, as we're going to rebuild
 		# it. It might be a symlink or a regular file.
@@ -486,9 +520,11 @@ function dotenv_managed_make {
 		fi
 		# If there is only one regular file as a fragment, we symlink from
 		# the active profile to the managed.
-		dotenv_dir_copy_parents "$DOTENV_ACTIVE/" "$DOTENV_MANAGED/" "$FILE_NAME" 
+		dotenv_dir_copy_parents "$DOTENV_MANIFEST/" "$DOTENV_MANAGED/" "$FILE_NAME" 
 		if [ "$FILE_FRAGMENTS" == "f" ]; then
-			ln -sfr "$FILE_ACTIVE" "$FILE_MANAGED"
+			# NOTE: We don't use the FILE_MANIFEST as it might not exist if the
+			# file is from a template.
+			ln -sfr "$(readlink -f "$FILE_MANIFEST")" "$FILE_MANAGED"
 		# Otherwise we assemble it
 		else
 			# TODO: Copy/apply file attributes
@@ -498,43 +534,37 @@ function dotenv_managed_make {
 }
 
 function dotenv_managed_cat {
-## TODO
+## Outputs the current value of the managed dotfile `DOTFILE`. 
+##
+## @param DOTFILE ― the path to the *dotfile*, which must be relative
+#         to `$DOTENV_MANAGED`
 	dotenv_assert_active_profile
 	for FILE in "$@"; do
 		dotenv_assert_file_is_dotfile "$FILE"
 		local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
 		local FILE_MANAGED="$DOTENV_MANAGED/$FILE_NAME"
+		# TODO: What to do if the file is not active?
 		if [ -e "$FILE_MANAGED" ]; then
 			cat "$FILE_MANAGED"
 		fi
 	done
 }
 
-function dotenv_managed_installed {
-## @param FILE the $DOTENV_USER_HOME 
-	local FILE="$1"
-	local FILE_NAME="${FILE#$DOTENV_USER_HOME/.}"
-	if [ "$(dotenv_file_is_dotfile "$FILE")" != "OK" ]; then
-		dotenv_error "File is not a dotfile: $FILE"
-	else
-		# TODO: Implement this
-		echo "TODO: INSTALLED $FILE"
-	fi
-
-}
-
 function dotenv_managed_install {
-## @param FILES relative to $DOTENV_USER_HOME that needs to be applied
-##        from the $DOTENV_MANAGED directory.
-##
 ## Takes a file readily available in $DOTENV_MANAGED and installs it
 ## in $DOTENV_USER_HOME. This requires that there is no existing backup
 ## for the given file.
+##
+## @param FILES ― relative to $DOTENV_USER_HOME that needs to be applied
+##        from the $DOTENV_MANAGED directory.
+##
 	dotenv_assert_active_profile
 	local FILE
 	local FILES=$*
 	if [ -z "$FILES" ]; then
-		FILES=$(dotenv_profile_manifest)
+		for FILE in $(dotenv_profile_manifest); do
+			FILES="$FILES $DOTENV_USER_HOME/.$FILE"
+		done
 	fi
 	for FILE in $FILES; do
 		dotenv_assert_file_is_dotfile "$FILE"
@@ -636,7 +666,10 @@ function dotenv_managed_revert {
 	local FILES="$*"
 	if [ -d "$DOTENV_MANAGED" ]; then
 		for FILE in $FILES; do
-			dotenv_assert_file_is_managed
+			if [ "$(dotenv_file_is_dotfile "$FILE")" == "OK" ];  then
+				FILE=$DOTENV_MANAGED/${FILE#$DOTENV_USER_HOME/.}
+			fi
+			dotenv_assert_file_is_managed "$FILE"
 			# TARGET is the dotfile path in the user's home
 			local FILE_NAME=${FILE#$DOTENV_MANAGED/}
 			local TARGET=$DOTENV_USER_HOME/.$FILE_NAME
@@ -895,6 +928,13 @@ function dotenv_dir_clean {
 }
 
 function dotenv_dir_copy_parents {
+## Copies the struture of the parent directory of the given
+## FILE relative to the SOURCE in DESTINATION
+##
+## @param SOURCE ― the source directory
+## @param DESTINATION ― the directory in which the parents
+##        will be copied
+## @param FILE ― the path of the file relative to SOURCE
 	local PARENT_NAME
 	PARENT_NAME=$(dirname "$3")
 	if [ "$PARENT_NAME" != "." ]; then
@@ -967,7 +1007,9 @@ function dotenv_file_copy {
 function dotenv_file_is_dotfile {
 ## @param FILE
 ## Echoes "OK" if the given file is a dotfile
-	dotenv_file_has_prefix "$1" "$DOTENV_USER_HOME/."
+	if [ "$(dotenv_file_has_prefix "$1" "$DOTENV_HOME/")" != "OK" ]; then
+		dotenv_file_has_prefix "$1" "$DOTENV_USER_HOME/."
+	fi
 }
 
 function dotenv_file_has_prefix {
