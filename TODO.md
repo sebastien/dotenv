@@ -17,3 +17,8 @@ Edge cases
 [ ] install: restore support for symlinks
 [ ] configure: output missing configuration variables
 
+Bugs
+====
+
+B000 ― When there is `npmrc` and `npmrc.tmpl` too many fragments are listed
+B001 − When adding a new file, it is not properly added to managed

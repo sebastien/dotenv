@@ -1,4 +1,4 @@
-# dotenv ― Collaboartive dotfiles manager
+# dotenv ― Collaborative dotfiles manager
 
 ```
      __          __
@@ -23,7 +23,7 @@ share a common setup, while allowing  for individual configuration and
 customization.
 
 `dotenv` also works well in a single-user setup where you have multiple
-environments on the same machine, or an single environment with machine-specific changes.
+environments on the same machine, or a single environment with machine-specific changes.
 
 Features:
 
@@ -46,14 +46,17 @@ To install `dotenv` in `~/local`, run:
 $ curl https://raw.githubusercontent.com/sebastien/dotenv/master/install.sh | bash
 ```
 
+This will install `dotenv` in `~/.local/bin` as well as the shell API files
+in `~/.local/lib/dotenv`.
+
 Now, start managing your existing configuration files and directories using `dotenv`
 
 ``` 
 $ dotenv -a ~/.bashrc ~/.vimrc ~/.vim
 ```
 
-This will move these files to `~/.dotenv/profiles/default` and create symlinks
-for them. If you'd like to see the files managed by dotenv at any time:
+This will create a default dotenv profile at `~/.dotenv/profiles/default` and add
+the given files to your profile:
 
 ```
 $ dotenv -l
@@ -62,7 +65,8 @@ $ dotenv -l
 ~/.vim		~/.dotenv/managed/vim
 ```
 
-## What can dotenv do?
+
+## Details
 
 Dotenv can essentially be seen as a way to share your dotfiles between machines
 and co-workers. The core concept of dotenv is the **profile**: a profile is a
@@ -70,7 +74,7 @@ set of files (and directories) linked to your `$HOME` directory, and prefixed
 with a dot. By default, profiles are stored in `~/.dotenv/profiles` and your
 **active profile** is symlinked to `~/.dotenv/active`.
 
-Now, imagine that you're working at a company that has some default
+Now, imagine that you're working at an organization that has some default
 configuration files (shell setup, editor defaults, gitrc/hgrc, etc), and that
 you'd like to bring your own dotfiles as well. Without dotenv, you'd copy the
 files and edit them locally. But what happens if you've updated your dotfiles at 
@@ -81,17 +85,32 @@ without losing your changes?
 ### Profile templates
 
 Dotenv introduces the notion of **profile template** to do just that: a profile
-template is a collection of files (just like a profile) that can be **merged into
-a profile**. You can have a *company profile template* (`~/.dotenv/templates/company`)
+template is a collection of files that can be **merged into
+a profile**. You can have a *organization profile template* (`~/.dotenv/templates/company`)
 and a *personal profile template* (`~/.dotenv/templates/personal`) and **merge
 both** into your default dotenv profile.
 
-You can also provide profile templates for specific tools:
+You can also provide profile templates for specific tools, such as your favorite editor:
+
+```
+.dotenv/templates
+	nvim
+		config/nvim
+			init.vim
+			…
+```
+
+and then, to make sure the template is included in the profile:
+
+```
+$ cat ~/.dotenv/active/dotenv.templates
+nvim
+```
 
 
 ### File templates
 
-Now, the company might provide files that contain placeholders to be filled
+Now, the organization might provide files that contain placeholders to be filled
 in with specific information, such as your name and email address. For instance, an
 `~/.hgrc` file that looks like this:
 
@@ -106,8 +125,8 @@ information? To handle this situation, dotenv introduces the notion of
 **file template**. A file template ends up with the `.tmpl` extension and
 will have any string contained in `${…}` be replaced by the contents of
 the corresponding environment variable. `Hello ${NAME}` will be replaced
-with `Hello, John` if `NAME="John"`. If the company ships the above `.hgrc`
-file as `~/dotenv/company/hgrc.tmpl`, the file template will be expanded to
+with `Hello, John` if `NAME="John"`. If the organization ships the above `.hgrc`
+file as `~/dotenv/organization/hgrc.tmpl`, the file template will be expanded to
 `~/.hgrc` based on the available environment variables.
 
 ### Profile configuration
@@ -123,7 +142,7 @@ Now we have a configurable `~/.hgrc` file that is always going to be in
 sync with upstream updates. But what if you'd like to add your own customization
 to the `~/.hgrc` file? If you edit it manually, it might be overridden by a future
 update (or at least, create a conflict). Ideally, you would
-combine the company template file with you own personal extensions. Dotenv
+combine the organization template file with you own personal extensions. Dotenv
 makes it possible with **file fragments**. A file fragment is defined in a
 *profile* or a *profile template* and is suffixed with `.pre`, `.post` or
 `.pre.N`, `.post.N` (where `N` is a number).

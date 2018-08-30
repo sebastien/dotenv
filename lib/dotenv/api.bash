@@ -102,9 +102,21 @@ function dotenv_assert_file_is_managed {
 # -----------------------------------------------------------------------------
 
 
-function dotenv_profile_configure {
-	$EDITOR "$DOTENV_ACTIVE/$CONFIG_NAME"
+function dotenv_profile_config_edit {
+	local FILE
+	for FILE in $(dotenv_profile_config_list); do
+		$EDITOR "$FILE"
+	done
 	dotenv_profile_apply "$(dotenv_profile_active)"
+}
+
+function dotenv_profile_config_list {
+	if [ -e "$DOTENV_HOME/$CONFIG_NAME" ]; then
+		echo "$DOTENV_HOME/$CONFIG_NAME"
+	fi
+	if [ -e "$DOTENV_ACTIVE/$CONFIG_NAME" ]; then
+		echo "$DOTENV_ACTIVE/$CONFIG_NAME"
+	fi
 }
 
 function dotenv_profile_create {
@@ -1189,7 +1201,7 @@ function dotenv_file_assemble {
 	for FRAGMENT in $(dotenv_file_fragment_list "$1"); do
 		case "$FRAGMENT" in
 			*.tmpl|*.tmpl.pre|*.tmpl.pre.*|*.tmpl.post|*.tmpl.post.*)
-				dotenv_tmpl_apply "$FRAGMENT"
+				dotenv_tmpl_apply "$FRAGMENT" "$(dotenv_profile_config_list)"
 				;;
 			*)
 				cat "$FRAGMENT"
@@ -1239,22 +1251,29 @@ function dotenv_tmpl_apply {
 ## environment variables that will then be replaces in the `TEMPLATE`. Any
 ## expression like `${NAME}` is going to be expanded with the value of
 ## `NAME`.
-	local FILE="$1"
-	local CONFIG="$2"
+	local FILE="$1" ; shift
+	local CONFIG=$*
 	if [ -z "$CONFIG" ]; then
 		CONFIG="$DOTENV_ACTIVE/$CONFIG_NAME"
 	fi
-	if [ ! -e "$CONFIG" ]; then
-		dotenv_fail "Configuration file $CONFIG does not exist"
+	if [ -z "$CONFIG" ]; then
+		dotenv_fail "dotenv/tmpl: No configuration file given"
 	else
 		# First, we get the list of fields from the $CONFIG file, which
 		# is supposed to be a shell script.
-		local FIELDS;FIELDS=$(grep -E "^(export\\s*)?[A-Z_]+\\s*=" "$CONFIG" | cut -d= -f1 | xargs echo)
+		local FIELDS;
+		local CONFIG_FILE
+		for CONFIG_FILE in $CONFIG; do
+			if [ ! -e "$CONFIG_FILE" ]; then
+				dotenv_fail "dotenv/tmpl: Configuration file $CONFIG does not exist"
+			fi
+			FIELDS="$FIELDS $(grep -E "^(export\\s*)?[A-Z_]+\\s*=" "$CONFIG_FILE" | cut -d= -f1 | xargs echo)"
+			source "$CONFIG_FILE"
+		done
 		# FIXME: We might want to backup the environment
 		# Now we source the data file. If this goes wrong, the script is
 		# probably going to stop.
 		# shellcheck source=/dev/null
-		source "$CONFIG"
 		# Now we build a SED expression to replace the strings.
 		local SEDEXPR=""
 		for FIELD in $FIELDS; do

@@ -74,7 +74,7 @@ function command-dotenv {
 			exit 0
 			;;
 		-c|--config|--configure)
-			dotenv_profile_configure "$1"
+			dotenv_profile_config_edit "$1"
 			exit 0
 			;;
 		# =====================================================================
