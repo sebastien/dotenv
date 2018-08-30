@@ -119,6 +119,18 @@ function dotenv_profile_config_list {
 	fi
 }
 
+function dotenv_profile_templates_edit {
+	local FILE="$DOTENV_ACTIVE/$TEMPLATE_NAME"
+	if [ ! -e "$FILE" ]; then
+		echo "# Dotenv profile template files" > "$FILE"
+		echo "# -" >> "$FILE"
+		echo "# Enter a list of directory names found in $DOTENV_HOME/templates" >> "$FILE"
+		echo "# and $DOTENV_HOME/profile to merge into your current profile" >> "$FILE"
+	fi
+	$EDITOR "$DOTENV_ACTIVE/$TEMPLATE_NAME"
+	dotenv_profile_apply "$(dotenv_profile_active)"
+}
+
 function dotenv_profile_create {
 ## Creates the profile with the given name if not already there
 	local PROFILE_NAME="$1"
@@ -167,7 +179,14 @@ function dotenv_profile_manifest_raw {
 	local TEMPLATE_FILE="$PROFILE_PATH/$TEMPLATE_NAME"
 	if [ -e "$TEMPLATE_FILE" ]; then
 		while read -r TEMPLATE; do
-			dotenv_profile_manifest_raw "$TEMPLATE"
+			case "$TEMPLATE" in
+			*\#*)
+				# We don't do anything if it starts with a hash
+				;;
+			*)
+				dotenv_profile_manifest_raw "$TEMPLATE"
+				;;
+			esac
 		done < "$TEMPLATE_FILE"
 	fi
 	# And now we output the files by profile

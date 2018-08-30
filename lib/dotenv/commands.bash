@@ -37,6 +37,7 @@ function command-dotenv {
 			echo " -p, --profile         List available profiles"
 			echo " -p, --profile PROFILE Activates/creates the given profile"
 			echo " -c, --configure       Configure the active profile"
+			echo " -t, --templates       Configure the active profile templates"
 			echo " -R, --revert-profile  Reverts the profile"
 			echo 
 			echo " FILE…"
@@ -75,6 +76,10 @@ function command-dotenv {
 			;;
 		-c|--config|--configure)
 			dotenv_profile_config_edit "$1"
+			exit 0
+			;;
+		-t|--templates)
+			dotenv_profile_templates_edit "$1"
 			exit 0
 			;;
 		# =====================================================================
