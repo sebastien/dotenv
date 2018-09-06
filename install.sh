@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-PREFIX=~/.local
-BIN_FILES=$(echo bin/*)
-LIB_FILES=$(echo lib/* lib/*/*.bash)
+PREFIX="$HOME/.local"
+BIN_FILES="bin/dotenv"
+LIB_FILES="lib/dotenv/api.bash lib/dotenv/commands.bash"
 ALL_FILES="$BIN_FILES $LIB_FILES"
 BASE_URL="https://raw.githubusercontent.com/sebastien/dotenv/master"
 
 if [ ! -e "$PREFIX" ]; then
-	echo "Prefix $PREFIX does not exist"
-	exit 1
+	mkdir -p "$PREFIX"
 fi
 
 # We dispatch the arguments
@@ -25,13 +24,9 @@ uninstall)
 	exit 0
 	;;
 install|link|*)
-	# We make sure the directories exist
-	if [ ! -d $PREFIX/bin ]; then
-		mkdir -p $PREFIX/bin
-	fi
 	# We iterate on all the files an install them
 	for FILE in $ALL_FILES; do
-		DST=$PREFIX/$FILE
+		DST="$PREFIX/$FILE"
 		DIR=$(dirname "$DST")
 		# We create the parent directory, if needed
 		if [ ! -d "$DIR" ]; then
@@ -56,8 +51,8 @@ install|link|*)
 		# as is
 		else
 			SRC=$BASE_URL/$FILE
-			echo "Installing from remote source $SRC → $DST"
-			curl "$SRC" > "$DST"
+			echo "Installing $DST from <$SRC>"
+			curl --silent "$SRC" > "$DST"
 		fi
 	done
 	# We make sure the BIN files are executable, which
@@ -65,6 +60,7 @@ install|link|*)
 	for FILE in $BIN_FILES; do
 		chmod +x "$PREFIX/$FILE"
 	done
+	echo "The \`dotenv\` command is now ready to be used!"
 esac
 
 # EOF - vim: ts=4 sw=4 noet 
