@@ -105,7 +105,7 @@ function dotenv_assert_file_is_managed {
 function dotenv_profile_config_edit {
 	local FILE
 	for FILE in $(dotenv_profile_config_list); do
-		$EDITOR "$FILE"
+		dotenv_file_edit "$FILE"
 	done
 	dotenv_profile_apply "$(dotenv_profile_active)"
 }
@@ -127,7 +127,7 @@ function dotenv_profile_templates_edit {
 		echo "# Enter a list of directory names found in $DOTENV_HOME/templates" >> "$FILE"
 		echo "# and $DOTENV_HOME/profile to merge into your current profile" >> "$FILE"
 	fi
-	$EDITOR "$DOTENV_ACTIVE/$TEMPLATE_NAME"
+	dotenv_file_edit "$DOTENV_ACTIVE/$TEMPLATE_NAME"
 	dotenv_profile_apply "$(dotenv_profile_active)"
 }
 
@@ -916,7 +916,7 @@ function dotenv_template_apply {
 		local CONFIG_DELTA;CONFIG_DELTA=$(dotenv_configuration_delta "$DOTENV_TEMPLATES/$TEMPLATE" "$CONFIG_DOTENV")
 		if [ ! -z "$CONFIG_DELTA" ]; then
 			echo "$CONFIG_DELTA" >> "$CONFIG_DOTENV"
-			$EDITOR "$CONFIG_DOTENV"
+			dotenv_file_edit "$CONFIG_DOTENV"
 		fi
 		# Now we apply the files of the given template to the profile
 		# directory.
@@ -1258,6 +1258,14 @@ function dotenv_file_origin {
 		echo "$ORIGIN"
 	else
 		dotenv_file_origin "$BASE" "$PARENT" "$ORIGIN"
+	fi
+}
+
+function dotenv_file_edit {
+	if [ -z "$EDITOR" ]; then
+		/usr/bin/env vi "$*"
+	else
+		"$EDITOR" "$*"
 	fi
 }
 
